@@ -29,6 +29,31 @@ deploy.
   `op run --env-file`, so `op://vault/item/field` references resolve at launch
   and secrets never sit decrypted on disk.
 
+## Runners
+
+Each project picks a **runner** — what it launches in the new window. The shared
+machinery (cwd, env, `op` credentials, terminal, window size, detach, logging,
+hold-open) is identical across all of them; only the inner command differs.
+
+| runner | launches | running-state / Stop via |
+|--------|----------|--------------------------|
+| **herdr** (default) | `herdr --session <name>` (+ remote/handoff/args) | herdr API socket |
+| **sesh** | `sesh connect <name>` (+ optional command) | tmux |
+| **tmux** | `tmux new-session -A -s <name>` (+ optional command) | tmux |
+| **shell** | a plain interactive shell — no multiplexer | — (ephemeral, no dot) |
+
+- **Full parity:** herdr / sesh / tmux projects show a running dot and get
+  **Attach** / **Stop**; sesh and tmux are both controlled through tmux
+  (`tmux list-sessions` / `kill-session`). `shell` is fire-and-forget.
+- **Background sessions** lists unmanaged sessions from *both* backends (running
+  herdr sessions and running tmux sessions with no project), tagged by backend.
+- **Nesting** is handled for all: the launch scrubs `HERDR_*` and `TMUX`/
+  `TMUX_PANE`, so launching from inside a herdr or tmux session starts a clean
+  top-level one.
+- **herdr-only** options (remote, handoff, workspace label, extra args) show in
+  the editor only when the runner is herdr; **sesh/tmux** get an optional
+  "command to run".
+
 ## Supported terminals
 
 Auto-detected, with a config override (`terminal = "…"`):

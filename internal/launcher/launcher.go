@@ -14,13 +14,15 @@ import (
 	"terminal-cowboy/internal/config"
 )
 
-// herdrSessionVars are the runtime env vars herdr injects into a session's
+// nestingVars are the runtime env vars a multiplexer injects into a session's
 // child processes to mark session context. Terminal Cowboy launches
-// independent top-level sessions, so these must be scrubbed — otherwise a
-// launch from inside an existing herdr session trips herdr's nested-session
-// guard ("nested herdr is disabled by default"). Config vars like
-// HERDR_CONFIG_PATH / HERDR_LOG are deliberately left intact.
-var herdrSessionVars = []string{
+// independent top-level sessions, so these are scrubbed — otherwise a launch
+// from inside an existing herdr/tmux session trips the multiplexer's
+// nested-session guard. Config vars (HERDR_CONFIG_PATH, HERDR_LOG) are left
+// intact. Scrubbing the whole set on every runner is harmless: a fresh window
+// never legitimately inherits them.
+var nestingVars = []string{
+	// herdr session context
 	"HERDR_SESSION",
 	"HERDR_CLIENT_SOCKET_PATH",
 	"HERDR_SOCKET_PATH",
@@ -32,6 +34,9 @@ var herdrSessionVars = []string{
 	"HERDR_ACTIVE_WORKSPACE_ID",
 	"HERDR_ACTIVE_PANE_CWD",
 	"HERDR_REATTACH_COMMAND",
+	// tmux (also covers sesh) session context
+	"TMUX",
+	"TMUX_PANE",
 }
 
 // Launcher spawns sessions into a chosen terminal.
@@ -40,12 +45,26 @@ type Launcher struct {
 	termChoice string    // global terminal choice (for per-project re-selection)
 	weztermBin string
 	HerdrBin   string
+	SeshBin    string
+	TmuxBin    string
 	OpBin      string
 	NewTab     bool
 	Shell      string
 	Login      bool
 	Cols       int
 	Rows       int
+}
+
+// resolveBin returns override if set, else looks up name on PATH, else name
+// (so it still resolves inside the launched login shell).
+func resolveBin(override, name string) string {
+	if override != "" {
+		return override
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return name
 }
 
 // terminalFor resolves the terminal for a session, honoring a per-project
@@ -63,28 +82,14 @@ func New(cfg *config.Config) (*Launcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	herdr := cfg.Global.HerdrBin
-	if herdr == "" {
-		if p, err := exec.LookPath("herdr"); err == nil {
-			herdr = p
-		} else {
-			herdr = "herdr" // fall back to PATH resolution inside the login shell
-		}
-	}
-	op := cfg.Global.OpBin
-	if op == "" {
-		if p, err := exec.LookPath("op"); err == nil {
-			op = p
-		} else {
-			op = "op"
-		}
-	}
 	return &Launcher{
 		Term:       term,
 		termChoice: cfg.Global.Terminal,
 		weztermBin: cfg.Global.WeztermBin,
-		HerdrBin:   herdr,
-		OpBin:      op,
+		HerdrBin:   resolveBin(cfg.Global.HerdrBin, "herdr"),
+		SeshBin:    resolveBin("", "sesh"),
+		TmuxBin:    resolveBin("", "tmux"),
+		OpBin:      resolveBin(cfg.Global.OpBin, "op"),
 		NewTab:     cfg.Global.NewTab,
 		Shell:      cfg.Global.Shell,
 		Login:      !cfg.Global.NoLoginShell,
@@ -95,8 +100,8 @@ func New(cfg *config.Config) (*Launcher, error) {
 
 // innerCommand builds the actual command run inside the window (no wrapping):
 //
-//	[op run --env-file=<openv> --] env K=V ... herdr --session <name> [args]
-func (l *Launcher) innerCommand(s config.Session, herdrSession string) string {
+//	[op run --env-file=<openv> --] env K=V ... <runner command>
+func (l *Launcher) innerCommand(s config.Session, sessionName string) string {
 	var inner []string
 	if s.HasOpEnv {
 		inner = append(inner, shQuote(l.OpBin), "run",
@@ -107,22 +112,54 @@ func (l *Launcher) innerCommand(s config.Session, herdrSession string) string {
 	for _, kv := range sortedEnv(s.Env) {
 		inner = append(inner, shQuote(kv))
 	}
-	inner = append(inner, shQuote(l.HerdrBin))
-	// Structured herdr options.
-	if s.Remote != "" {
-		inner = append(inner, "--remote", shQuote(s.Remote))
-		if s.RemoteKeybindings != "" {
-			inner = append(inner, "--remote-keybindings", shQuote(s.RemoteKeybindings))
-		}
-	}
-	if s.Handoff {
-		inner = append(inner, "--handoff")
-	}
-	inner = append(inner, "--session", shQuote(herdrSession))
-	for _, a := range s.HerdrArgs {
-		inner = append(inner, shQuote(a))
-	}
+	inner = append(inner, l.runnerCommand(s, sessionName)...)
 	return strings.Join(inner, " ")
+}
+
+// shellExpr is the shell used to run an optional per-session command; unquoted
+// so $SHELL expands in-window.
+const shellExpr = "\"${SHELL:-/bin/sh}\""
+
+// runnerCommand returns the runner-specific argv (already shell-quoted).
+func (l *Launcher) runnerCommand(s config.Session, name string) []string {
+	switch s.EffectiveRunner() {
+	case config.RunnerTmux:
+		// Attach if the session exists, else create it.
+		c := []string{shQuote(l.TmuxBin), "new-session", "-A", "-s", shQuote(name)}
+		if s.RunnerCmd != "" {
+			c = append(c, shellExpr, "-c", shQuote(s.RunnerCmd))
+		}
+		return c
+
+	case config.RunnerSesh:
+		// sesh connect attaches or creates a tmux-backed session.
+		c := []string{shQuote(l.SeshBin), "connect", shQuote(name)}
+		if s.RunnerCmd != "" {
+			c = append(c, "--command", shQuote(s.RunnerCmd))
+		}
+		return c
+
+	case config.RunnerShell:
+		// A plain interactive shell in the project's cwd with env/creds applied.
+		return []string{shellExpr}
+
+	default: // herdr
+		c := []string{shQuote(l.HerdrBin)}
+		if s.Remote != "" {
+			c = append(c, "--remote", shQuote(s.Remote))
+			if s.RemoteKeybindings != "" {
+				c = append(c, "--remote-keybindings", shQuote(s.RemoteKeybindings))
+			}
+		}
+		if s.Handoff {
+			c = append(c, "--handoff")
+		}
+		c = append(c, "--session", shQuote(name))
+		for _, a := range s.HerdrArgs {
+			c = append(c, shQuote(a))
+		}
+		return c
+	}
 }
 
 // Script builds the shell script run inside the new terminal window.
@@ -146,7 +183,7 @@ func (l *Launcher) Script(s config.Session, herdrSession, logPath string) string
 	// Scrub inherited herdr session context so a launch from inside an existing
 	// herdr session starts a clean top-level session instead of tripping the
 	// nested-session guard.
-	fmt.Fprintf(&b, "unset %s; ", strings.Join(herdrSessionVars, " "))
+	fmt.Fprintf(&b, "unset %s; ", strings.Join(nestingVars, " "))
 	// Friendly banner in the window.
 	fmt.Fprintf(&b, "printf '\\033[33m🤠 terminal-cowboy\\033[0m  project=%s  session=%s\\n'; ",
 		shBanner(s.Name), shBanner(herdrSession))
@@ -264,8 +301,8 @@ func shBanner(s string) string {
 
 // cleanEnv returns the current environment minus herdr's session-context vars.
 func cleanEnv() []string {
-	skip := make(map[string]bool, len(herdrSessionVars))
-	for _, v := range herdrSessionVars {
+	skip := make(map[string]bool, len(nestingVars))
+	for _, v := range nestingVars {
 		skip[v] = true
 	}
 	env := os.Environ()

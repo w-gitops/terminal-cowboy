@@ -47,6 +47,8 @@
   .name{font-weight:600;font-size:16px}
   .name .op{font:11px/1 var(--mono);color:var(--accent2);border:1px solid var(--accent2);
     border-radius:4px;padding:2px 5px;margin-left:8px;vertical-align:middle}
+  .name .runner{font:11px/1 var(--mono);color:var(--dim);border:1px solid var(--line);
+    border-radius:4px;padding:2px 5px;margin-left:8px;vertical-align:middle}
   .desc{color:var(--dim);font-size:13px;margin:2px 0 0}
   .meta{font:12px/1.4 var(--mono);color:var(--dim);margin-top:8px;
     word-break:break-all}
@@ -122,21 +124,32 @@
     <h3 id="editTitle">New project</h3>
     <label>Name</label>
     <input id="fName" placeholder="barista" autocomplete="off">
-    <div class="hint">Used as the herdr session name and config folder. Letters, numbers, . _ -</div>
+    <div class="hint">Used as the session name and config folder. Letters, numbers, . _ -</div>
 
     <label>Description</label>
     <input id="fDesc" placeholder="Barista coffee-ordering agent" autocomplete="off">
 
+    <label>Runner</label>
+    <select id="fRunner">
+      <option value="herdr">herdr — AI agent workspace manager</option>
+      <option value="sesh">sesh — smart tmux/zoxide session manager</option>
+      <option value="tmux">tmux — attach-or-create a tmux session</option>
+      <option value="shell">shell — a plain terminal (no multiplexer)</option>
+    </select>
+    <div class="hint">What the project launches in the new window.</div>
+
     <label>Working directory (cwd)</label>
     <input id="fCwd" placeholder="~/git/barista" autocomplete="off">
+
+    <div id="cmdField" style="display:none">
+      <label>Command (optional)</label>
+      <input id="fRunnerCmd" placeholder="npm run dev" autocomplete="off">
+      <div class="hint">Run this command in the session when it's first created.</div>
+    </div>
 
     <label>Terminal (override)</label>
     <select id="fTerminal"></select>
     <div class="hint">Blank = use the global default from Settings.</div>
-
-    <label>Workspace label</label>
-    <input id="fWsLabel" placeholder="blank = session name" autocomplete="off">
-    <div class="hint">herdr workspace title after launch. Free text (spaces/emoji ok). Blank = the session name.</div>
 
     <div style="display:flex;gap:12px">
       <div style="flex:1">
@@ -150,22 +163,28 @@
     </div>
     <div class="hint">Initial window size in <b>character cells, not pixels</b> (e.g. 120 × 40). 0 or blank = terminal default.</div>
 
-    <label>Remote herdr server (SSH target)</label>
-    <input id="fRemote" placeholder="user@host  (blank = local)" autocomplete="off">
-    <div id="remoteExtra" style="display:none">
-      <label>Remote keybindings</label>
-      <select id="fRemoteKb">
-        <option value="local">local</option>
-        <option value="server">server</option>
-      </select>
+    <div id="herdrFields">
+      <label>Workspace label</label>
+      <input id="fWsLabel" placeholder="blank = session name" autocomplete="off">
+      <div class="hint">herdr workspace title after launch. Free text (spaces/emoji ok). Blank = the session name.</div>
+
+      <label>Remote herdr server (SSH target)</label>
+      <input id="fRemote" placeholder="user@host  (blank = local)" autocomplete="off">
+      <div id="remoteExtra" style="display:none">
+        <label>Remote keybindings</label>
+        <select id="fRemoteKb">
+          <option value="local">local</option>
+          <option value="server">server</option>
+        </select>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)">
+        <input type="checkbox" id="fHandoff" style="width:auto"> Live handoff (--handoff)
+      </label>
+
+      <label>Extra herdr args (space-separated)</label>
+      <input id="fArgs" placeholder="--default-config" autocomplete="off">
     </div>
-
-    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)">
-      <input type="checkbox" id="fHandoff" style="width:auto"> Live handoff (--handoff)
-    </label>
-
-    <label>Extra herdr args (space-separated)</label>
-    <input id="fArgs" placeholder="--default-config" autocomplete="off">
 
     <label>Environment variables</label>
     <div id="envRows"></div>
@@ -189,9 +208,9 @@
   <div class="modal">
     <h3>Launch window</h3>
     <div class="hint" id="launchProject" style="margin-bottom:6px"></div>
-    <label>herdr session name</label>
+    <label>session name</label>
     <input id="fSession" autocomplete="off">
-    <div class="hint">Same project folder & credentials. Change the name to open an independent second window (e.g. barista-2).</div>
+    <div class="hint">Same project folder, runner & credentials. Change the name to open an independent second session (e.g. barista-2).</div>
     <div class="modal-actions">
       <div class="grow"></div>
       <button class="ghost" id="cancelLaunch">Cancel</button>
@@ -332,17 +351,18 @@ function renderUnmanaged(){
   if(!items.length){ section.style.display='none'; return; }
   section.style.display='';
   for(const u of items){
+    const backend=u.backend||'herdr';
     const el=document.createElement('div'); el.className='card';
     el.innerHTML=`
       <div class="top">
         <span class="dot on" title="running"></span>
-        <div><div class="name">${esc(u.name)}${u.default?'<span class="op" style="border-color:var(--dim);color:var(--dim)">default</span>':''}</div>
-        <div class="desc">background herdr session</div></div>
+        <div><div class="name">${esc(u.name)}<span class="runner">${esc(backend)}</span>${u.default?'<span class="op" style="border-color:var(--dim);color:var(--dim)">default</span>':''}</div>
+        <div class="desc">background ${esc(backend)} session</div></div>
         <div class="actions"></div>
       </div>`;
     const actions=el.querySelector('.actions');
     const attach=btn('Attach','primary',async()=>{
-      try{ const r=await api('/api/attach',{method:'POST',headers:hdr(),body:JSON.stringify({name:u.name})});
+      try{ const r=await api('/api/attach',{method:'POST',headers:hdr(),body:JSON.stringify({name:u.name,backend})});
         toast('Attached in '+r.terminal); setTimeout(load,700); }
       catch(e){ toast(e.message,true); }
     });
@@ -350,7 +370,7 @@ function renderUnmanaged(){
     actions.append(attach, btn('Logs','ghost',()=>openLogs(u.name)));
     if(!u.default){ // never offer to stop the default session
       const stop=btn('Stop','ghost danger',async()=>{
-        try{ await api('/api/stop',{method:'POST',headers:hdr(),body:JSON.stringify({name:u.name})});
+        try{ await api('/api/stop',{method:'POST',headers:hdr(),body:JSON.stringify({name:u.name,backend})});
           toast('Stopped '+u.name); load(); }
         catch(e){ toast(e.message,true); }
       });
@@ -361,20 +381,27 @@ function renderUnmanaged(){
   }
 }
 
+const BACKEND = {herdr:'herdr', sesh:'tmux', tmux:'tmux', shell:''};
+
 function card(sess){
   const el = document.createElement('div');
   el.className='card';
+  const runner = sess.runner || 'herdr';
+  const backend = BACKEND[runner] || '';
   const envKeys = Object.keys(sess.env||{});
   const meta = [];
   if(sess.cwd) meta.push('cwd: '+sess.cwd);
   if(envKeys.length) meta.push('env: '+envKeys.join(', '));
   if(sess.herdr_args && sess.herdr_args.length) meta.push('args: '+sess.herdr_args.join(' '));
   if(sess.terminal) meta.push('term: '+sess.terminal);
+  // Ephemeral runners (shell) have no persistent session → neutral dot.
+  const dotClass = sess.ephemeral ? '' : (sess.running?'on':'');
+  const dotTitle = sess.ephemeral ? 'no persistent session' : (sess.running?'running':'stopped');
   el.innerHTML = `
     <div class="top">
-      <span class="dot ${sess.running?'on':''}" title="${sess.running?'running':'stopped'}"></span>
+      <span class="dot ${dotClass}" title="${dotTitle}"></span>
       <div>
-        <div class="name">${esc(sess.name)}${sess.has_op_env?'<span class="op">op</span>':''}</div>
+        <div class="name">${esc(sess.name)}<span class="runner">${esc(runner)}</span>${sess.has_op_env?'<span class="op">op</span>':''}</div>
         ${sess.description?`<div class="desc">${esc(sess.description)}</div>`:''}
       </div>
       <div class="actions"></div>
@@ -382,21 +409,22 @@ function card(sess){
     ${meta.length?`<div class="meta">${esc(meta.join('  ·  '))}</div>`:''}`;
   const actions = el.querySelector('.actions');
 
-  const launch = btn(sess.running?'Attach':'Launch','primary',()=>doLaunch(sess.name, sess.name));
-  launch.title = sess.running
-    ? 'Session is running on the herdr server — open a window attached to it'
+  const isAttach = sess.running && !sess.ephemeral;
+  const launch = btn(isAttach?'Attach':'Launch','primary',()=>doLaunch(sess.name, sess.name));
+  launch.title = isAttach
+    ? 'Session is running — open a window attached to it'
     : 'Start the session in a new terminal window';
   const second = btn('+ window','ghost',()=>openLaunch(sess));
   const logs = btn('Logs','ghost',()=>openLogs(sess.name));
   const edit = btn('Edit','ghost',()=>openEdit(sess.name));
   actions.append(launch, second, logs, edit);
-  if(sess.running){
+  if(isAttach && backend){
     const stop = btn('Stop','ghost danger', async()=>{
-      try{ await api('/api/stop',{method:'POST',headers:hdr(),body:JSON.stringify({name:sess.name})});
+      try{ await api('/api/stop',{method:'POST',headers:hdr(),body:JSON.stringify({name:sess.name,backend})});
         toast('Stopped '+sess.name); load(); }
       catch(e){ toast(e.message,true); }
     });
-    stop.title = 'Stop the running session on the herdr server (frees it back to “Launch”)';
+    stop.title = 'Stop the running session (frees it back to “Launch”)';
     actions.append(stop);
   }
   return el;
@@ -452,6 +480,13 @@ function fillTerminalOptions(sel){
 function syncRemote(){ $('#remoteExtra').style.display = $('#fRemote').value.trim()?'':'none'; }
 $('#fRemote').addEventListener('input', syncRemote);
 
+function syncRunner(){
+  const r=$('#fRunner').value;
+  $('#herdrFields').style.display = r==='herdr' ? '' : 'none';
+  $('#cmdField').style.display = (r==='tmux'||r==='sesh') ? '' : 'none';
+}
+$('#fRunner').addEventListener('change', syncRunner);
+
 function openNew(){
   editingName=null;
   $('#editTitle').textContent='New project';
@@ -459,8 +494,8 @@ function openNew(){
   $('#fName').disabled=false;
   $('#fName').value='';$('#fDesc').value='';$('#fCwd').value='';$('#fArgs').value='';$('#fOp').value='';
   $('#fCols').value='';$('#fRows').value='';$('#fRemote').value='';$('#fRemoteKb').value='local';$('#fHandoff').checked=false;
-  $('#fWsLabel').value='';
-  fillTerminalOptions(''); syncRemote();
+  $('#fWsLabel').value='';$('#fRunner').value='herdr';$('#fRunnerCmd').value='';
+  fillTerminalOptions(''); syncRemote(); syncRunner();
   $('#envRows').innerHTML='';
   show('#editScrim'); $('#fName').focus();
 }
@@ -478,7 +513,9 @@ async function openEdit(name){
     $('#fWsLabel').value=s.workspace_label||'';
     $('#fCols').value=s.cols||'';$('#fRows').value=s.rows||'';
     $('#fRemote').value=s.remote||'';$('#fRemoteKb').value=s.remote_keybindings||'local';
-    $('#fHandoff').checked=!!s.handoff; syncRemote();
+    $('#fHandoff').checked=!!s.handoff;
+    $('#fRunner').value=s.runner||'herdr';$('#fRunnerCmd').value=s.runner_cmd||'';
+    syncRemote(); syncRunner();
     $('#envRows').innerHTML='';
     for(const [k,v] of Object.entries(s.env||{})) $('#envRows').appendChild(envRow(k,v));
     show('#editScrim');
@@ -498,6 +535,8 @@ $('#saveBtn').onclick=async()=>{
     name:$('#fName').value.trim(),
     description:$('#fDesc').value.trim(),
     cwd:$('#fCwd').value.trim(),
+    runner:$('#fRunner').value,
+    runner_cmd:$('#fRunnerCmd').value.trim(),
     herdr_args:args?args.split(/\s+/):[],
     env,
     terminal:$('#fTerminal').value,

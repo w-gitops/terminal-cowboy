@@ -36,6 +36,8 @@ type Session struct {
 	Name        string            `toml:"name"`        // defaults to directory name
 	Description string            `toml:"description"` // shown in the UI
 	Cwd         string            `toml:"cwd"`         // working directory for the launch
+	Runner      string            `toml:"runner"`      // herdr|sesh|tmux|shell (default herdr)
+	RunnerCmd   string            `toml:"runner_cmd"`  // optional command to run (tmux/sesh)
 	HerdrArgs   []string          `toml:"herdr_args"`  // extra args appended to `herdr --session <name>`
 	Env         map[string]string `toml:"env"`         // plain env vars exported into the session
 
@@ -56,6 +58,35 @@ type Session struct {
 	Dir      string `toml:"-"` // absolute path to the session directory
 	OpEnv    string `toml:"-"` // absolute path to .op.env if present, else ""
 	HasOpEnv bool   `toml:"-"`
+}
+
+// Runner identifiers.
+const (
+	RunnerHerdr = "herdr"
+	RunnerSesh  = "sesh"
+	RunnerTmux  = "tmux"
+	RunnerShell = "shell"
+)
+
+// EffectiveRunner returns the session's runner, defaulting to herdr.
+func (s Session) EffectiveRunner() string {
+	if s.Runner == "" {
+		return RunnerHerdr
+	}
+	return s.Runner
+}
+
+// Backend returns the status/control backend for a runner: "herdr", "tmux"
+// (also serves sesh), or "" for runners with no persistent session (shell).
+func Backend(runner string) string {
+	switch runner {
+	case RunnerSesh, RunnerTmux:
+		return "tmux"
+	case RunnerHerdr:
+		return "herdr"
+	default:
+		return ""
+	}
 }
 
 // Config is the fully-resolved configuration.

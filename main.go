@@ -22,6 +22,7 @@ import (
 	"terminal-cowboy/internal/config"
 	"terminal-cowboy/internal/herdr"
 	"terminal-cowboy/internal/launcher"
+	"terminal-cowboy/internal/tmux"
 )
 
 //go:embed web
@@ -124,8 +125,10 @@ type sessionView struct {
 	HerdrArgs   []string          `json:"herdr_args"`
 	Env         map[string]string `json:"env"`
 	Terminal    string            `json:"terminal"`
+	Runner      string            `json:"runner"`
 	HasOpEnv    bool              `json:"has_op_env"`
 	Running     bool              `json:"running"`
+	Ephemeral   bool              `json:"ephemeral"` // no persistent session (shell) — no running dot
 }
 
 // unmanagedView is a herdr session that is running (or known to herdr) but has
@@ -135,6 +138,7 @@ type unmanagedView struct {
 	Name    string `json:"name"`
 	Running bool   `json:"running"`
 	Default bool   `json:"default"`
+	Backend string `json:"backend"` // herdr|tmux — how to attach/stop it
 }
 
 type stateResponse struct {
@@ -173,28 +177,44 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 		resp.Terminal = t.ID
 	}
 
-	// Live herdr state; failure is non-fatal (state unknown).
+	// Live state from both backends; failures are non-fatal (state unknown).
 	hc := &herdr.Client{Bin: s.cfg.Global.HerdrBin}
-	running := map[string]bool{}
+	herdrRunning := map[string]bool{}
 	var herdrSessions []herdr.Session
 	if sessions, err := hc.List(r.Context()); err == nil {
 		resp.HerdrOK = true
 		herdrSessions = sessions
-		running = herdr.RunningSet(sessions)
+		herdrRunning = herdr.RunningSet(sessions)
+	}
+	tc := &tmux.Client{}
+	tmuxRunning := tc.RunningSet(r.Context())
+
+	// Track which session names each backend "owns" via a project, so unmanaged
+	// listing only surfaces sessions with no backing project.
+	herdrProject := map[string]bool{}
+	tmuxProject := map[string]bool{}
+	for _, sess := range s.cfg.Sessions {
+		switch config.Backend(sess.EffectiveRunner()) {
+		case "herdr":
+			herdrProject[sess.Name] = true
+		case "tmux":
+			tmuxProject[sess.Name] = true
+		}
 	}
 
-	projectNames := make(map[string]bool, len(s.cfg.Sessions))
-	for _, sess := range s.cfg.Sessions {
-		projectNames[sess.Name] = true
-	}
-	// Running herdr sessions with no backing project — visible so you can see
-	// and control background sessions that Terminal Cowboy didn't launch.
+	// Unmanaged herdr sessions.
 	for _, hs := range herdrSessions {
-		if hs.Running && !projectNames[hs.Name] {
+		if hs.Running && !herdrProject[hs.Name] {
 			resp.Unmanaged = append(resp.Unmanaged, unmanagedView{
-				Name:    hs.Name,
-				Running: hs.Running,
-				Default: hs.Default,
+				Name: hs.Name, Running: true, Default: hs.Default, Backend: "herdr",
+			})
+		}
+	}
+	// Unmanaged tmux sessions (also covers sesh).
+	for name := range tmuxRunning {
+		if !tmuxProject[name] {
+			resp.Unmanaged = append(resp.Unmanaged, unmanagedView{
+				Name: name, Running: true, Backend: "tmux",
 			})
 		}
 	}
@@ -208,6 +228,15 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 		if args == nil {
 			args = []string{}
 		}
+		runner := sess.EffectiveRunner()
+		backend := config.Backend(runner)
+		running := false
+		switch backend {
+		case "herdr":
+			running = herdrRunning[sess.Name]
+		case "tmux":
+			running = tmuxRunning[sess.Name]
+		}
 		resp.Sessions = append(resp.Sessions, sessionView{
 			Name:        sess.Name,
 			Description: sess.Description,
@@ -215,8 +244,10 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 			HerdrArgs:   args,
 			Env:         env,
 			Terminal:    sess.Terminal,
+			Runner:      runner,
 			HasOpEnv:    sess.HasOpEnv,
-			Running:     running[sess.Name],
+			Running:     running,
+			Ephemeral:   backend == "",
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -269,8 +300,8 @@ func (s *server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Label the initial herdr workspace (herdr otherwise names it after the
-	// launch directory). Best-effort, in the background.
-	if !s.cfg.Global.NoWorkspaceLabel {
+	// launch directory). herdr-only; best-effort, in the background.
+	if sess.EffectiveRunner() == config.RunnerHerdr && !s.cfg.Global.NoWorkspaceLabel {
 		name := req.HerdrSession
 		if name == "" {
 			name = sess.Name
@@ -305,12 +336,14 @@ func labelWorkspaceAsync(herdrBin, name, label, logPath string) {
 }
 
 type attachRequest struct {
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	Backend string `json:"backend"` // herdr|tmux (default herdr)
 }
 
-// handleAttach opens a window attached to an existing herdr session that has no
+// handleAttach opens a window attached to an existing session that has no
 // backing project (an "unmanaged" session). No cwd/env/credentials are applied
-// — it simply runs `herdr --session <name>`.
+// — it runs the backend's attach-or-create command (`herdr --session <name>`
+// or `tmux new-session -A -s <name>`).
 func (s *server) handleAttach(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "POST required")
@@ -325,6 +358,10 @@ func (s *server) handleAttach(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	runner := config.RunnerHerdr
+	if req.Backend == "tmux" {
+		runner = config.RunnerTmux
+	}
 	l, err := launcher.New(s.cfg)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -335,8 +372,8 @@ func (s *server) handleAttach(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Bare session: just attach by name.
-	termID, err := l.Launch(config.Session{Name: req.Name}, req.Name, logDir)
+	// Bare session: just attach by name via the right backend.
+	termID, err := l.Launch(config.Session{Name: req.Name, Runner: runner}, req.Name, logDir)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -348,6 +385,8 @@ type sessionRequest struct {
 	Name              string            `json:"name"`
 	Description       string            `json:"description"`
 	Cwd               string            `json:"cwd"`
+	Runner            string            `json:"runner"`
+	RunnerCmd         string            `json:"runner_cmd"`
 	HerdrArgs         []string          `json:"herdr_args"`
 	Env               map[string]string `json:"env"`
 	Terminal          string            `json:"terminal"`
@@ -388,6 +427,8 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 			"name":               sess.Name,
 			"description":        sess.Description,
 			"cwd":                sess.Cwd,
+			"runner":             sess.EffectiveRunner(),
+			"runner_cmd":         sess.RunnerCmd,
 			"herdr_args":         args,
 			"env":                env,
 			"terminal":           sess.Terminal,
@@ -415,6 +456,8 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 			Name:              req.Name,
 			Description:       req.Description,
 			Cwd:               req.Cwd,
+			Runner:            req.Runner,
+			RunnerCmd:         req.RunnerCmd,
 			HerdrArgs:         req.HerdrArgs,
 			Env:               req.Env,
 			Terminal:          req.Terminal,
@@ -445,7 +488,8 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type stopRequest struct {
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	Backend string `json:"backend"` // herdr|tmux; empty falls back to the project's runner
 }
 
 func (s *server) handleStop(w http.ResponseWriter, r *http.Request) {
@@ -462,10 +506,26 @@ func (s *server) handleStop(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "name required")
 		return
 	}
-	hc := &herdr.Client{Bin: s.cfg.Global.HerdrBin}
+	// Resolve backend: explicit, else from a matching project's runner.
+	backend := req.Backend
+	if backend == "" {
+		if sess, ok := s.findSession(req.Name); ok {
+			backend = config.Backend(sess.EffectiveRunner())
+		} else {
+			backend = "herdr"
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	if err := hc.Stop(ctx, req.Name); err != nil {
+
+	var err error
+	switch backend {
+	case "tmux":
+		err = (&tmux.Client{}).Stop(ctx, req.Name)
+	default:
+		err = (&herdr.Client{Bin: s.cfg.Global.HerdrBin}).Stop(ctx, req.Name)
+	}
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
