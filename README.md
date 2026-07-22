@@ -118,6 +118,30 @@ sh -lc "cd ~/git/barista; exec \
 - Plain env vars use `/usr/bin/env` (portable across macOS and Linux).
 - A login shell (`sh -lc`) ensures `herdr`/`op` on your PATH resolve.
 
+## Logs & troubleshooting
+
+When a launch fails (missing `cwd`, `op` not signed in, herdr error), the window
+**stays open** showing the error and a `press Enter to close…` prompt, instead
+of vanishing. Every launch is also recorded to a per-session log:
+
+```
+~/.config/terminal-cowboy/logs/<session>.log
+```
+
+Each entry records the project, herdr session, terminal, cwd, whether `.op.env`
+was used, the exact `argv` that ran, and the final exit code. View them with the
+**Logs** button on any project card, or read the files directly. Secondary
+windows log under their own name (e.g. `barista-2.log`).
+
+## Settings
+
+The **⚙ Settings** panel edits the global `config.toml`:
+
+- **Web server address / port** — where the app listens. Changes take effect
+  after a restart (the UI tells you).
+- **Terminal** — `auto` or a specific detected terminal.
+- **New tab vs new window** — how sessions open, where the terminal supports it.
+
 ## Requirements
 
 `herdr`, and whichever terminal you use, on PATH. `op` (1Password CLI) signed in
