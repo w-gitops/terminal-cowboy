@@ -149,6 +149,15 @@ sh -lc "cd ~/git/barista; exec \
 - Plain env vars use `/usr/bin/env` (portable across macOS and Linux).
 - A login shell (`sh -lc`) ensures `herdr`/`op` on your PATH resolve.
 
+## Launched windows outlive the server
+
+Terminal Cowboy is a launcher: windows it opens are started **detached, in their
+own session/process group** (`setsid`), so exiting the server — Ctrl-C (SIGINT to
+its process group) or closing its terminal (SIGHUP to its session) — never tears
+them down. (A window-size override in particular makes wezterm spawn a GUI as a
+child of the server; detaching keeps that window alive regardless.) The herdr
+session itself always persists on the herdr server either way.
+
 ## Dotfiles / GNU stow
 
 All config lives under `~/.config/terminal-cowboy/`, so it travels with a

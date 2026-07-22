@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"terminal-cowboy/internal/config"
 )
@@ -206,6 +207,12 @@ func (l *Launcher) Launch(s config.Session, herdrSession, logDir string) (string
 	cmd.Env = cleanEnv()
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	// Detach the launched terminal into its own session/process group so it
+	// outlives terminal-cowboy: Ctrl-C on the server (SIGINT to its process
+	// group) and closing the server's terminal (SIGHUP to its session) must not
+	// tear down windows we opened. Without this, a window-size override makes
+	// wezterm spawn a GUI as our child, which then dies with us.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		appendLog(logPath, fmt.Sprintf("ERROR starting %s: %v", term.ID, err))
 		return "", fmt.Errorf("start %s: %w", term.ID, err)
