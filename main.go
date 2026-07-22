@@ -27,6 +27,10 @@ import (
 //go:embed web
 var webFS embed.FS
 
+// Version is injected at build time via -ldflags "-X main.Version=...".
+// Format: YYYY-MM-DD.HHMM-<shortsha>[-dirty]. Defaults to "dev" for `go run`.
+var Version = "dev"
+
 func main() {
 	var (
 		addrFlag = flag.String("addr", "", "override listen address (host)")
@@ -72,7 +76,7 @@ func main() {
 	}
 
 	url := fmt.Sprintf("http://%s/", listenAddr)
-	log.Printf("terminal-cowboy listening on %s", url)
+	log.Printf("terminal-cowboy %s listening on %s", Version, url)
 	log.Printf("config: %s", srv.cfg.Root)
 	if *open {
 		go openBrowser(url)
@@ -134,6 +138,7 @@ type unmanagedView struct {
 }
 
 type stateResponse struct {
+	Version            string          `json:"version"`
 	Terminal           string          `json:"terminal"`     // selected terminal id, or "" if none
 	TerminalErr        string          `json:"terminal_err"` // why selection failed, if any
 	AvailableTerminals []string        `json:"available_terminals"`
@@ -159,6 +164,7 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := stateResponse{
+		Version:            Version,
 		AvailableTerminals: launcher.Detect(),
 	}
 	if t, err := launcher.Select(s.cfg.Global.Terminal, s.cfg.Global.WeztermBin); err != nil {

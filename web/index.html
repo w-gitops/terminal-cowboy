@@ -75,6 +75,8 @@
   .toast.show{opacity:1}
   .toast.err{border-color:var(--danger);color:var(--danger)}
   a.link{color:var(--accent);cursor:pointer}
+  .ver{font:11px/1 var(--mono);color:var(--dim);background:var(--panel2);
+    border:1px solid var(--line);border-radius:5px;padding:3px 7px}
   .ico{display:inline-block}
   @keyframes spin{to{transform:rotate(360deg)}}
   #refreshBtn.busy .ico{animation:spin .6s linear infinite}
@@ -85,6 +87,7 @@
 <header>
   <span class="hat">🤠</span>
   <h1>Terminal <span>Cowboy</span></h1>
+  <span class="ver" id="ver" title="build version"></span>
   <div class="term-badge" id="termBadge">…</div>
 </header>
 
@@ -128,15 +131,15 @@
 
     <div style="display:flex;gap:12px">
       <div style="flex:1">
-        <label>Columns</label>
-        <input id="fCols" type="number" min="0" placeholder="default" autocomplete="off">
+        <label>Columns (characters wide)</label>
+        <input id="fCols" type="number" min="0" placeholder="120" autocomplete="off">
       </div>
       <div style="flex:1">
-        <label>Rows</label>
-        <input id="fRows" type="number" min="0" placeholder="default" autocomplete="off">
+        <label>Rows (lines tall)</label>
+        <input id="fRows" type="number" min="0" placeholder="40" autocomplete="off">
       </div>
     </div>
-    <div class="hint">Initial window size. 0 or blank = terminal default.</div>
+    <div class="hint">Initial window size in <b>character cells, not pixels</b> (e.g. 120 × 40). 0 or blank = terminal default.</div>
 
     <label>Remote herdr server (SSH target)</label>
     <input id="fRemote" placeholder="user@host  (blank = local)" autocomplete="off">
@@ -210,15 +213,15 @@
 
     <div style="display:flex;gap:12px">
       <div style="flex:1">
-        <label>Default columns</label>
-        <input id="sCols" type="number" min="0" placeholder="terminal default" autocomplete="off">
+        <label>Default columns (chars wide)</label>
+        <input id="sCols" type="number" min="0" placeholder="120" autocomplete="off">
       </div>
       <div style="flex:1">
-        <label>Default rows</label>
-        <input id="sRows" type="number" min="0" placeholder="terminal default" autocomplete="off">
+        <label>Default rows (lines tall)</label>
+        <input id="sRows" type="number" min="0" placeholder="40" autocomplete="off">
       </div>
     </div>
-    <div class="hint">Default window size for all projects (overridable per project).</div>
+    <div class="hint">Default window size in <b>character cells, not pixels</b> (e.g. 120 × 40, like the classic 80 × 24). 0 or blank = terminal default. Overridable per project.</div>
 
     <label>Shell</label>
     <input id="sShell" placeholder="sh" autocomplete="off">
@@ -287,6 +290,7 @@ function renderUpdated(){
 setInterval(renderUpdated, 1000);
 
 function renderBadge(){
+  $('#ver').textContent = STATE.version || '';
   const b = $('#termBadge');
   const avail = (STATE.available_terminals||[]).join(', ') || 'none';
   if(STATE.terminal){

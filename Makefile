@@ -2,10 +2,19 @@ BINARY := terminal-cowboy
 DIST   := dist
 PREFIX ?= $(HOME)/.local
 
-.PHONY: build run fmt vet test clean cross install uninstall
+# Version: YYYY-MM-DD.HHMM-<shortsha>[-dirty], computed at build time.
+SHA     := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo nogit)
+DIRTY   := $(shell git diff --quiet 2>/dev/null || echo -dirty)
+VERSION := $(shell date +%Y-%m-%d.%H%M)-$(SHA)$(DIRTY)
+LDFLAGS := -X 'main.Version=$(VERSION)'
+
+.PHONY: build run fmt vet test clean cross install uninstall version
+
+version:
+	@echo $(VERSION)
 
 build:
-	go build -o $(BINARY) .
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 run: build
 	./$(BINARY) --open
@@ -38,7 +47,7 @@ uninstall:
 ## cross: build release binaries for the supported hosts.
 cross:
 	mkdir -p $(DIST)
-	GOOS=darwin  GOARCH=arm64 go build -o $(DIST)/$(BINARY)-darwin-arm64  .
-	GOOS=linux   GOARCH=amd64 go build -o $(DIST)/$(BINARY)-linux-amd64   .
-	GOOS=linux   GOARCH=arm64 go build -o $(DIST)/$(BINARY)-linux-arm64   .
-	@echo "built:" && ls -1 $(DIST)
+	GOOS=darwin  GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST)/$(BINARY)-darwin-arm64  .
+	GOOS=linux   GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(DIST)/$(BINARY)-linux-amd64   .
+	GOOS=linux   GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(DIST)/$(BINARY)-linux-arm64   .
+	@echo "built $(VERSION):" && ls -1 $(DIST)
