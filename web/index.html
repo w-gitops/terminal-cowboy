@@ -75,6 +75,10 @@
   .toast.show{opacity:1}
   .toast.err{border-color:var(--danger);color:var(--danger)}
   a.link{color:var(--accent);cursor:pointer}
+  .ico{display:inline-block}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #refreshBtn.busy .ico{animation:spin .6s linear infinite}
+  .updated{font:11px/1 var(--mono);color:var(--dim);margin-left:2px}
 </style>
 </head>
 <body>
@@ -88,7 +92,8 @@
   <div class="bar">
     <h2>Sessions</h2>
     <div class="grow"></div>
-    <button class="ghost" id="refreshBtn" title="Refresh">↻</button>
+    <button class="ghost" id="refreshBtn" title="Refresh status"><span class="ico">↻</span> Refresh</button>
+    <span class="updated" id="updated"></span>
     <button class="ghost" id="settingsBtn" title="Settings">⚙ Settings</button>
     <button class="primary" id="newBtn">+ New project</button>
   </div>
@@ -205,12 +210,24 @@ async function api(path, opts){
   return body;
 }
 
+let lastUpdated=0, loading=false;
 async function load(){
+  if(loading) return;          // avoid overlapping refreshes
+  loading=true;
+  const btn=$('#refreshBtn'); btn.classList.add('busy');
   try{
     STATE = await api('/api/state');
-  }catch(e){ toast('Load failed: '+e.message, true); return; }
-  renderBadge(); renderList();
+    lastUpdated=Date.now();
+    renderBadge(); renderList(); renderUpdated();
+  }catch(e){ toast('Load failed: '+e.message, true); }
+  finally{ loading=false; btn.classList.remove('busy'); }
 }
+function renderUpdated(){
+  const el=$('#updated'); if(!lastUpdated){el.textContent='';return;}
+  const s=Math.round((Date.now()-lastUpdated)/1000);
+  el.textContent = s<2 ? 'updated just now' : 'updated '+s+'s ago';
+}
+setInterval(renderUpdated, 1000);
 
 function renderBadge(){
   const b = $('#termBadge');
@@ -254,16 +271,21 @@ function card(sess){
   const actions = el.querySelector('.actions');
 
   const launch = btn(sess.running?'Attach':'Launch','primary',()=>doLaunch(sess.name, sess.name));
+  launch.title = sess.running
+    ? 'Session is running on the herdr server — open a window attached to it'
+    : 'Start the session in a new terminal window';
   const second = btn('+ window','ghost',()=>openLaunch(sess));
   const logs = btn('Logs','ghost',()=>openLogs(sess.name));
   const edit = btn('Edit','ghost',()=>openEdit(sess.name));
   actions.append(launch, second, logs, edit);
   if(sess.running){
-    actions.append(btn('Stop','ghost danger', async()=>{
+    const stop = btn('Stop','ghost danger', async()=>{
       try{ await api('/api/stop',{method:'POST',headers:hdr(),body:JSON.stringify({name:sess.name})});
         toast('Stopped '+sess.name); load(); }
       catch(e){ toast(e.message,true); }
-    }));
+    });
+    stop.title = 'Stop the running session on the herdr server (frees it back to “Launch”)';
+    actions.append(stop);
   }
   return el;
 }
@@ -436,6 +458,9 @@ $('#refreshBtn').onclick=load;
 
 load();
 setInterval(load, 8000); // keep running-state fresh
+// Refresh when returning to the browser (e.g. after closing a terminal window).
+window.addEventListener('focus', load);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(); });
 </script>
 </body>
 </html>
