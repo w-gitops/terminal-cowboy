@@ -122,8 +122,38 @@
     <label>Working directory (cwd)</label>
     <input id="fCwd" placeholder="~/git/barista" autocomplete="off">
 
+    <label>Terminal (override)</label>
+    <select id="fTerminal"></select>
+    <div class="hint">Blank = use the global default from Settings.</div>
+
+    <div style="display:flex;gap:12px">
+      <div style="flex:1">
+        <label>Columns</label>
+        <input id="fCols" type="number" min="0" placeholder="default" autocomplete="off">
+      </div>
+      <div style="flex:1">
+        <label>Rows</label>
+        <input id="fRows" type="number" min="0" placeholder="default" autocomplete="off">
+      </div>
+    </div>
+    <div class="hint">Initial window size. 0 or blank = terminal default.</div>
+
+    <label>Remote herdr server (SSH target)</label>
+    <input id="fRemote" placeholder="user@host  (blank = local)" autocomplete="off">
+    <div id="remoteExtra" style="display:none">
+      <label>Remote keybindings</label>
+      <select id="fRemoteKb">
+        <option value="local">local</option>
+        <option value="server">server</option>
+      </select>
+    </div>
+
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)">
+      <input type="checkbox" id="fHandoff" style="width:auto"> Live handoff (--handoff)
+    </label>
+
     <label>Extra herdr args (space-separated)</label>
-    <input id="fArgs" placeholder="--remote-keybindings local" autocomplete="off">
+    <input id="fArgs" placeholder="--default-config" autocomplete="off">
 
     <label>Environment variables</label>
     <div id="envRows"></div>
@@ -176,6 +206,25 @@
 
     <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)">
       <input type="checkbox" id="sNewTab" style="width:auto"> Open a new tab instead of a new window (where supported)
+    </label>
+
+    <div style="display:flex;gap:12px">
+      <div style="flex:1">
+        <label>Default columns</label>
+        <input id="sCols" type="number" min="0" placeholder="terminal default" autocomplete="off">
+      </div>
+      <div style="flex:1">
+        <label>Default rows</label>
+        <input id="sRows" type="number" min="0" placeholder="terminal default" autocomplete="off">
+      </div>
+    </div>
+    <div class="hint">Default window size for all projects (overridable per project).</div>
+
+    <label>Shell</label>
+    <input id="sShell" placeholder="sh" autocomplete="off">
+    <div class="hint">Shell used to run the launch script (e.g. sh, bash, zsh, fish).</div>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)">
+      <input type="checkbox" id="sLogin" style="width:auto"> Use a login shell (loads your profile so PATH finds herdr/op)
     </label>
 
     <div class="hint" id="sPath" style="margin-top:14px"></div>
@@ -303,6 +352,7 @@ function card(sess){
   if(sess.cwd) meta.push('cwd: '+sess.cwd);
   if(envKeys.length) meta.push('env: '+envKeys.join(', '));
   if(sess.herdr_args && sess.herdr_args.length) meta.push('args: '+sess.herdr_args.join(' '));
+  if(sess.terminal) meta.push('term: '+sess.terminal);
   el.innerHTML = `
     <div class="top">
       <span class="dot ${sess.running?'on':''}" title="${sess.running?'running':'stopped'}"></span>
@@ -373,12 +423,26 @@ function envRow(k='',v=''){
 }
 $('#addEnvBtn').onclick=()=>$('#envRows').appendChild(envRow());
 
+function fillTerminalOptions(sel){
+  const el=$('#fTerminal'); el.innerHTML='';
+  const avail=STATE.available_terminals||[];
+  const opts=[['','(global default)'], ...avail.map(t=>[t,t])];
+  for(const [v,label] of opts){
+    const o=document.createElement('option');o.value=v;o.textContent=label;
+    if(sel===v) o.selected=true; el.appendChild(o);
+  }
+}
+function syncRemote(){ $('#remoteExtra').style.display = $('#fRemote').value.trim()?'':'none'; }
+$('#fRemote').addEventListener('input', syncRemote);
+
 function openNew(){
   editingName=null;
   $('#editTitle').textContent='New project';
   $('#deleteBtn').style.display='none';
   $('#fName').disabled=false;
   $('#fName').value='';$('#fDesc').value='';$('#fCwd').value='';$('#fArgs').value='';$('#fOp').value='';
+  $('#fCols').value='';$('#fRows').value='';$('#fRemote').value='';$('#fRemoteKb').value='local';$('#fHandoff').checked=false;
+  fillTerminalOptions(''); syncRemote();
   $('#envRows').innerHTML='';
   show('#editScrim'); $('#fName').focus();
 }
@@ -392,6 +456,10 @@ async function openEdit(name){
     $('#fName').value=s.name;$('#fDesc').value=s.description||'';
     $('#fCwd').value=s.cwd||'';$('#fArgs').value=(s.herdr_args||[]).join(' ');
     $('#fOp').value=s.op_env||'';
+    fillTerminalOptions(s.terminal||'');
+    $('#fCols').value=s.cols||'';$('#fRows').value=s.rows||'';
+    $('#fRemote').value=s.remote||'';$('#fRemoteKb').value=s.remote_keybindings||'local';
+    $('#fHandoff').checked=!!s.handoff; syncRemote();
     $('#envRows').innerHTML='';
     for(const [k,v] of Object.entries(s.env||{})) $('#envRows').appendChild(envRow(k,v));
     show('#editScrim');
@@ -406,12 +474,19 @@ $('#saveBtn').onclick=async()=>{
     const k=ki.value.trim(); if(k) env[k]=vi.value;
   }
   const args=$('#fArgs').value.trim();
+  const remote=$('#fRemote').value.trim();
   const payload={
     name:$('#fName').value.trim(),
     description:$('#fDesc').value.trim(),
     cwd:$('#fCwd').value.trim(),
     herdr_args:args?args.split(/\s+/):[],
     env,
+    terminal:$('#fTerminal').value,
+    cols:parseInt($('#fCols').value,10)||0,
+    rows:parseInt($('#fRows').value,10)||0,
+    remote,
+    remote_keybindings:remote?$('#fRemoteKb').value:'',
+    handoff:$('#fHandoff').checked,
     op_env:$('#fOp').value, // always send; server writes/removes accordingly
   };
   try{
@@ -435,6 +510,9 @@ async function openSettings(){
     $('#sAddr').value=c.addr||'127.0.0.1';
     $('#sPort').value=c.port||8787;
     $('#sNewTab').checked=!!c.new_tab;
+    $('#sCols').value=c.cols||'';$('#sRows').value=c.rows||'';
+    $('#sShell').value=c.shell||'';
+    $('#sLogin').checked=!c.no_login_shell;
     $('#sPath').textContent='config file: '+(c.config_path||'');
     // terminal dropdown: auto + detected
     const avail = STATE.available_terminals||[];
@@ -458,6 +536,10 @@ $('#saveSettings').onclick=async()=>{
     port:parseInt($('#sPort').value,10)||8787,
     terminal:$('#sTerminal').value,
     new_tab:$('#sNewTab').checked,
+    cols:parseInt($('#sCols').value,10)||0,
+    rows:parseInt($('#sRows').value,10)||0,
+    shell:$('#sShell').value.trim(),
+    no_login_shell:!$('#sLogin').checked,
   };
   try{
     const r=await api('/api/config',{method:'POST',headers:hdr(),body:JSON.stringify(payload)});

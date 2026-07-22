@@ -14,14 +14,18 @@ import (
 
 // Global holds server-wide settings from config.toml.
 type Global struct {
-	Addr        string `toml:"addr"`         // listen address, default 127.0.0.1
-	Port        int    `toml:"port"`         // listen port, default 8787
-	Terminal    string `toml:"terminal"`     // wezterm|kitty|iterm2|ghostty|auto (default auto)
-	WeztermBin  string `toml:"wezterm"`      // optional override path to wezterm
-	HerdrBin    string `toml:"herdr"`        // optional override path to herdr
-	OpBin       string `toml:"op"`           // optional override path to op
-	SessionsDir string `toml:"sessions_dir"` // optional override for sessions dir
-	NewTab      bool   `toml:"new_tab"`      // spawn a new tab instead of a new window
+	Addr         string `toml:"addr"`           // listen address, default 127.0.0.1
+	Port         int    `toml:"port"`           // listen port, default 8787
+	Terminal     string `toml:"terminal"`       // wezterm|kitty|iterm2|ghostty|auto (default auto)
+	WeztermBin   string `toml:"wezterm"`        // optional override path to wezterm
+	HerdrBin     string `toml:"herdr"`          // optional override path to herdr
+	OpBin        string `toml:"op"`             // optional override path to op
+	SessionsDir  string `toml:"sessions_dir"`   // optional override for sessions dir
+	NewTab       bool   `toml:"new_tab"`        // spawn a new tab instead of a new window
+	Shell        string `toml:"shell"`          // shell that runs the launch script (default sh)
+	NoLoginShell bool   `toml:"no_login_shell"` // don't use a login shell (default: login shell)
+	Cols         int    `toml:"cols"`           // initial window columns (0 = terminal default)
+	Rows         int    `toml:"rows"`           // initial window rows (0 = terminal default)
 }
 
 // Session is one launchable backend, defined by sessions/<name>/session.toml.
@@ -31,6 +35,16 @@ type Session struct {
 	Cwd         string            `toml:"cwd"`         // working directory for the launch
 	HerdrArgs   []string          `toml:"herdr_args"`  // extra args appended to `herdr --session <name>`
 	Env         map[string]string `toml:"env"`         // plain env vars exported into the session
+
+	// Structured herdr options (also expressible via HerdrArgs, but nicer in the UI).
+	Remote            string `toml:"remote"`             // --remote <ssh-target>
+	RemoteKeybindings string `toml:"remote_keybindings"` // local|server (only with remote)
+	Handoff           bool   `toml:"handoff"`            // --handoff
+
+	// Per-project overrides (empty/0 = use the global default).
+	Terminal string `toml:"terminal"` // wezterm|kitty|iterm2|ghostty (override global)
+	Cols     int    `toml:"cols"`     // window columns
+	Rows     int    `toml:"rows"`     // window rows
 
 	Dir      string `toml:"-"` // absolute path to the session directory
 	OpEnv    string `toml:"-"` // absolute path to .op.env if present, else ""

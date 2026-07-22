@@ -35,10 +35,25 @@ var herdrSessionVars = []string{
 
 // Launcher spawns sessions into a chosen terminal.
 type Launcher struct {
-	Term     *Terminal
-	HerdrBin string
-	OpBin    string
-	NewTab   bool
+	Term       *Terminal // default terminal resolved from the global config
+	termChoice string    // global terminal choice (for per-project re-selection)
+	weztermBin string
+	HerdrBin   string
+	OpBin      string
+	NewTab     bool
+	Shell      string
+	Login      bool
+	Cols       int
+	Rows       int
+}
+
+// terminalFor resolves the terminal for a session, honoring a per-project
+// override and falling back to the global default.
+func (l *Launcher) terminalFor(s config.Session) (*Terminal, error) {
+	if strings.TrimSpace(s.Terminal) != "" {
+		return Select(s.Terminal, l.weztermBin)
+	}
+	return l.Term, nil
 }
 
 // New resolves the terminal and binary paths from config.
@@ -64,10 +79,16 @@ func New(cfg *config.Config) (*Launcher, error) {
 		}
 	}
 	return &Launcher{
-		Term:     term,
-		HerdrBin: herdr,
-		OpBin:    op,
-		NewTab:   cfg.Global.NewTab,
+		Term:       term,
+		termChoice: cfg.Global.Terminal,
+		weztermBin: cfg.Global.WeztermBin,
+		HerdrBin:   herdr,
+		OpBin:      op,
+		NewTab:     cfg.Global.NewTab,
+		Shell:      cfg.Global.Shell,
+		Login:      !cfg.Global.NoLoginShell,
+		Cols:       cfg.Global.Cols,
+		Rows:       cfg.Global.Rows,
 	}, nil
 }
 
@@ -85,7 +106,18 @@ func (l *Launcher) innerCommand(s config.Session, herdrSession string) string {
 	for _, kv := range sortedEnv(s.Env) {
 		inner = append(inner, shQuote(kv))
 	}
-	inner = append(inner, shQuote(l.HerdrBin), "--session", shQuote(herdrSession))
+	inner = append(inner, shQuote(l.HerdrBin))
+	// Structured herdr options.
+	if s.Remote != "" {
+		inner = append(inner, "--remote", shQuote(s.Remote))
+		if s.RemoteKeybindings != "" {
+			inner = append(inner, "--remote-keybindings", shQuote(s.RemoteKeybindings))
+		}
+	}
+	if s.Handoff {
+		inner = append(inner, "--handoff")
+	}
+	inner = append(inner, "--session", shQuote(herdrSession))
 	for _, a := range s.HerdrArgs {
 		inner = append(inner, shQuote(a))
 	}
@@ -132,45 +164,65 @@ func (l *Launcher) Script(s config.Session, herdrSession, logPath string) string
 	return b.String()
 }
 
-// Launch opens the project in a new terminal window/tab. herdrSession overrides
-// the herdr --session name (empty = the project's own name). logDir is where a
-// per-session launch log is written and appended to.
-func (l *Launcher) Launch(s config.Session, herdrSession, logDir string) error {
+// Launch opens the project in a new terminal window/tab, honoring per-project
+// terminal and window-size overrides. herdrSession overrides the herdr
+// --session name (empty = the project's own name). Returns the terminal used.
+func (l *Launcher) Launch(s config.Session, herdrSession, logDir string) (string, error) {
 	name := herdrSession
 	if name == "" {
 		name = s.Name
 	}
 	logPath := filepath.Join(logDir, name+".log")
 
+	term, err := l.terminalFor(s)
+	if err != nil {
+		appendLog(logPath, fmt.Sprintf("ERROR selecting terminal: %v", err))
+		return "", err
+	}
+
+	opts := WindowOpts{
+		Shell:  l.Shell,
+		Login:  l.Login,
+		NewTab: l.NewTab,
+		Cols:   firstNonZero(s.Cols, l.Cols),
+		Rows:   firstNonZero(s.Rows, l.Rows),
+	}
+
 	script := l.Script(s, herdrSession, logPath)
-	argv := l.Term.Argv(script, l.NewTab)
+	argv := term.Argv(script, opts)
 	if len(argv) == 0 {
-		return fmt.Errorf("terminal %s produced no command", l.Term.ID)
+		return "", fmt.Errorf("terminal %s produced no command", term.ID)
 	}
 
 	// Record the attempt server-side, so there is always a log even if the
 	// window itself never opens (e.g. terminal binary is broken).
-	l.record(logPath, s, name, argv)
+	l.record(logPath, s, name, term.ID, argv)
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = cleanEnv()
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
-		l.record(logPath, s, name, argv)
-		appendLog(logPath, fmt.Sprintf("ERROR starting %s: %v", l.Term.ID, err))
-		return fmt.Errorf("start %s: %w", l.Term.ID, err)
+		appendLog(logPath, fmt.Sprintf("ERROR starting %s: %v", term.ID, err))
+		return "", fmt.Errorf("start %s: %w", term.ID, err)
 	}
 	// Reap the launcher process (most exit immediately after spawning the window).
 	go cmd.Wait()
-	return nil
+	return term.ID, nil
+}
+
+func firstNonZero(a, b int) int {
+	if a != 0 {
+		return a
+	}
+	return b
 }
 
 // record appends a launch header to the log describing exactly what was run.
-func (l *Launcher) record(logPath string, s config.Session, herdrSession string, argv []string) {
+func (l *Launcher) record(logPath string, s config.Session, herdrSession, termID string, argv []string) {
 	var b strings.Builder
 	b.WriteString("\n──────────────────────────────────────────────\n")
-	fmt.Fprintf(&b, "launch project=%s session=%s terminal=%s\n", s.Name, herdrSession, l.Term.ID)
+	fmt.Fprintf(&b, "launch project=%s session=%s terminal=%s\n", s.Name, herdrSession, termID)
 	if s.Cwd != "" {
 		fmt.Fprintf(&b, "cwd=%s\n", s.Cwd)
 	}

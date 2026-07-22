@@ -88,6 +88,10 @@ addr     = "127.0.0.1"   # listen host
 port     = 8787
 terminal = "auto"        # auto | wezterm | kitty | iterm2 | ghostty
 new_tab  = false         # open a new tab instead of a new window (where supported)
+cols     = 0             # default window columns (0 = terminal default)
+rows     = 0             # default window rows
+shell    = "sh"          # shell that runs the launch script (sh|bash|zsh|fish)
+no_login_shell = false   # set true to skip the login shell (-l)
 
 # Optional explicit binary paths (otherwise resolved from PATH):
 # wezterm = "/Applications/WezTerm.app/Contents/MacOS/wezterm"
@@ -95,18 +99,32 @@ new_tab  = false         # open a new tab instead of a new window (where support
 # op      = "/usr/bin/op"
 ```
 
+All of the above are editable from the **⚙ Settings** panel.
+
 ### sessions/<name>/session.toml (per project)
 
 ```toml
 name        = "barista"              # herdr session name (defaults to folder name)
 description = "Barista ordering agent"
 cwd         = "~/git/barista"        # cd here before launching
-herdr_args  = ["--remote-keybindings", "local"]  # appended to herdr --session <name>
+herdr_args  = ["--default-config"]   # extra args appended to herdr --session <name>
+
+# Optional per-project overrides (blank / 0 = use the global default):
+terminal    = "wezterm"              # wezterm | kitty | iterm2 | ghostty
+cols        = 100                    # window columns
+rows        = 30                     # window rows
+
+# Structured herdr options (nicer than raw herdr_args):
+remote            = ""               # --remote <ssh-target> (blank = local)
+remote_keybindings = "local"         # local | server (only used with remote)
+handoff           = false            # --handoff
 
 [env]
 ROLE      = "barista"
 LOG_LEVEL = "debug"
 ```
+
+All of these are editable per project in the UI's project editor.
 
 ### sessions/<name>/.op.env (per project, optional)
 
@@ -130,6 +148,30 @@ sh -lc "cd ~/git/barista; exec \
 - `op run` is only added when a `.op.env` exists.
 - Plain env vars use `/usr/bin/env` (portable across macOS and Linux).
 - A login shell (`sh -lc`) ensures `herdr`/`op` on your PATH resolve.
+
+## Dotfiles / GNU stow
+
+All config lives under `~/.config/terminal-cowboy/`, so it travels with a
+dotfiles repo. With GNU stow, put it in a package and stow it into `$HOME`:
+
+```
+~/dotfiles/terminal-cowboy/.config/terminal-cowboy/
+  config.toml
+  sessions/<name>/{session.toml,.op.env}
+```
+
+```sh
+cd ~/dotfiles && stow terminal-cowboy
+```
+
+Notes:
+
+- **`.op.env` is safe to commit/stow** — it holds `op://vault/item/field`
+  *references*, not secrets, which `op` resolves at launch. Do **not** put
+  literal secrets there.
+- **Exclude `logs/`** — it's ephemeral launch output. Add `logs/` to your
+  dotfiles `.gitignore` (or don't stow it).
+- Paths in `cwd` use `~`, so they resolve correctly on any machine.
 
 ## Logs & troubleshooting
 

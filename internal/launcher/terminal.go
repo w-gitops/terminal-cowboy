@@ -141,44 +141,93 @@ func Detect() []string {
 	return out
 }
 
-// Argv builds the exec argv that opens a new window/tab running `script` in a
-// login shell. newTab is honored where the terminal supports it.
-func (t *Terminal) Argv(script string, newTab bool) []string {
-	sh := []string{"sh", "-lc", script}
+// WindowOpts controls how the new window/tab is opened.
+type WindowOpts struct {
+	Shell  string // shell binary, e.g. "sh"; defaults to "sh" if empty
+	Login  bool   // run it as a login shell (-l)
+	NewTab bool   // spawn a new tab instead of a new window, where supported
+	Cols   int    // initial columns (0 = terminal default)
+	Rows   int    // initial rows (0 = terminal default)
+}
+
+// shellArgv builds [shell, -l?, -c, script].
+func (o WindowOpts) shellArgv(script string) []string {
+	sh := o.Shell
+	if sh == "" {
+		sh = "sh"
+	}
+	argv := []string{sh}
+	if o.Login {
+		argv = append(argv, "-l")
+	}
+	return append(argv, "-c", script)
+}
+
+// Argv builds the exec argv that opens a new window/tab running `script`.
+func (t *Terminal) Argv(script string, o WindowOpts) []string {
+	sh := o.shellArgv(script)
 	switch t.kind {
 	case kindWezterm:
-		args := []string{t.Bin, "start"}
-		if newTab {
+		args := []string{t.Bin}
+		if o.Cols > 0 {
+			args = append(args, "--config", fmt.Sprintf("initial_cols=%d", o.Cols))
+		}
+		if o.Rows > 0 {
+			args = append(args, "--config", fmt.Sprintf("initial_rows=%d", o.Rows))
+		}
+		args = append(args, "start")
+		if o.NewTab {
 			args = append(args, "--new-tab")
 		}
 		args = append(args, "--")
 		return append(args, sh...)
 	case kindKitty:
 		// `kitty <cmd>` opens a new OS window running the command.
-		return append([]string{t.Bin}, sh...)
+		args := []string{t.Bin}
+		if o.Cols > 0 {
+			args = append(args, "-o", fmt.Sprintf("initial_window_width=%dc", o.Cols))
+		}
+		if o.Rows > 0 {
+			args = append(args, "-o", fmt.Sprintf("initial_window_height=%dc", o.Rows))
+		}
+		return append(args, sh...)
 	case kindGhostty:
-		return append([]string{t.Bin, "-e"}, sh...)
+		args := []string{t.Bin}
+		if o.Cols > 0 {
+			args = append(args, fmt.Sprintf("--window-width=%d", o.Cols))
+		}
+		if o.Rows > 0 {
+			args = append(args, fmt.Sprintf("--window-height=%d", o.Rows))
+		}
+		return append(args, append([]string{"-e"}, sh...)...)
 	case kindITerm2:
-		return iterm2Argv(script, newTab)
+		return iterm2Argv(script, o)
 	}
 	return nil
 }
 
 // iterm2Argv drives iTerm2 through AppleScript, since it has no direct exec CLI.
-func iterm2Argv(script string, newTab bool) []string {
+func iterm2Argv(script string, o WindowOpts) []string {
 	target := "create window with default profile"
 	sessionRef := "current session of current window"
-	if newTab {
+	if o.NewTab {
 		target = "tell current window to create tab with default profile"
 		sessionRef = "current session of current tab of current window"
+	}
+	var size string
+	if o.Cols > 0 {
+		size += fmt.Sprintf("\n    set columns to %d", o.Cols)
+	}
+	if o.Rows > 0 {
+		size += fmt.Sprintf("\n    set rows to %d", o.Rows)
 	}
 	as := fmt.Sprintf(`tell application "iTerm2"
   activate
   %s
-  tell %s
+  tell %s%s
     write text %s
   end tell
-end tell`, target, sessionRef, appleQuote(script))
+end tell`, target, sessionRef, size, appleQuote(script))
 	return []string{"osascript", "-e", as}
 }
 

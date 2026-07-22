@@ -119,6 +119,7 @@ type sessionView struct {
 	Cwd         string            `json:"cwd"`
 	HerdrArgs   []string          `json:"herdr_args"`
 	Env         map[string]string `json:"env"`
+	Terminal    string            `json:"terminal"`
 	HasOpEnv    bool              `json:"has_op_env"`
 	Running     bool              `json:"running"`
 }
@@ -207,6 +208,7 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 			Cwd:         sess.Cwd,
 			HerdrArgs:   args,
 			Env:         env,
+			Terminal:    sess.Terminal,
 			HasOpEnv:    sess.HasOpEnv,
 			Running:     running[sess.Name],
 		})
@@ -254,11 +256,12 @@ func (s *server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := l.Launch(sess, req.HerdrSession, logDir); err != nil {
+	termID, err := l.Launch(sess, req.HerdrSession, logDir)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "terminal": l.Term.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "terminal": termID})
 }
 
 type attachRequest struct {
@@ -293,20 +296,27 @@ func (s *server) handleAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Bare session: just attach by name.
-	if err := l.Launch(config.Session{Name: req.Name}, req.Name, logDir); err != nil {
+	termID, err := l.Launch(config.Session{Name: req.Name}, req.Name, logDir)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "terminal": l.Term.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "terminal": termID})
 }
 
 type sessionRequest struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Cwd         string            `json:"cwd"`
-	HerdrArgs   []string          `json:"herdr_args"`
-	Env         map[string]string `json:"env"`
-	OpEnv       *string           `json:"op_env"` // nil = leave unchanged; "" = remove
+	Name              string            `json:"name"`
+	Description       string            `json:"description"`
+	Cwd               string            `json:"cwd"`
+	HerdrArgs         []string          `json:"herdr_args"`
+	Env               map[string]string `json:"env"`
+	Terminal          string            `json:"terminal"`
+	Cols              int               `json:"cols"`
+	Rows              int               `json:"rows"`
+	Remote            string            `json:"remote"`
+	RemoteKeybindings string            `json:"remote_keybindings"`
+	Handoff           bool              `json:"handoff"`
+	OpEnv             *string           `json:"op_env"` // nil = leave unchanged; "" = remove
 }
 
 // handleSession implements GET (fetch one, incl. op_env for editing),
@@ -334,12 +344,18 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 			args = []string{}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"name":        sess.Name,
-			"description": sess.Description,
-			"cwd":         sess.Cwd,
-			"herdr_args":  args,
-			"env":         env,
-			"op_env":      opEnv,
+			"name":               sess.Name,
+			"description":        sess.Description,
+			"cwd":                sess.Cwd,
+			"herdr_args":         args,
+			"env":                env,
+			"terminal":           sess.Terminal,
+			"cols":               sess.Cols,
+			"rows":               sess.Rows,
+			"remote":             sess.Remote,
+			"remote_keybindings": sess.RemoteKeybindings,
+			"handoff":            sess.Handoff,
+			"op_env":             opEnv,
 		})
 
 	case http.MethodPost:
@@ -354,11 +370,17 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sess := config.Session{
-			Name:        req.Name,
-			Description: req.Description,
-			Cwd:         req.Cwd,
-			HerdrArgs:   req.HerdrArgs,
-			Env:         req.Env,
+			Name:              req.Name,
+			Description:       req.Description,
+			Cwd:               req.Cwd,
+			HerdrArgs:         req.HerdrArgs,
+			Env:               req.Env,
+			Terminal:          req.Terminal,
+			Cols:              req.Cols,
+			Rows:              req.Rows,
+			Remote:            req.Remote,
+			RemoteKeybindings: req.RemoteKeybindings,
+			Handoff:           req.Handoff,
 		}
 		if err := s.cfg.SaveSession(sess, req.OpEnv); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
@@ -408,10 +430,14 @@ func (s *server) handleStop(w http.ResponseWriter, r *http.Request) {
 }
 
 type configRequest struct {
-	Addr     string `json:"addr"`
-	Port     int    `json:"port"`
-	Terminal string `json:"terminal"`
-	NewTab   bool   `json:"new_tab"`
+	Addr         string `json:"addr"`
+	Port         int    `json:"port"`
+	Terminal     string `json:"terminal"`
+	NewTab       bool   `json:"new_tab"`
+	Shell        string `json:"shell"`
+	NoLoginShell bool   `json:"no_login_shell"`
+	Cols         int    `json:"cols"`
+	Rows         int    `json:"rows"`
 }
 
 // handleConfig gets (GET) or updates (POST) the global web-server + launch
@@ -426,11 +452,15 @@ func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		g := s.cfg.Global
 		writeJSON(w, http.StatusOK, map[string]any{
-			"addr":        g.Addr,
-			"port":        g.Port,
-			"terminal":    g.Terminal,
-			"new_tab":     g.NewTab,
-			"config_path": filepath.Join(s.cfg.Root, "config.toml"),
+			"addr":           g.Addr,
+			"port":           g.Port,
+			"terminal":       g.Terminal,
+			"new_tab":        g.NewTab,
+			"shell":          g.Shell,
+			"no_login_shell": g.NoLoginShell,
+			"cols":           g.Cols,
+			"rows":           g.Rows,
+			"config_path":    filepath.Join(s.cfg.Root, "config.toml"),
 		})
 
 	case http.MethodPost:
@@ -453,6 +483,10 @@ func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		g.Port = req.Port
 		g.Terminal = req.Terminal
 		g.NewTab = req.NewTab
+		g.Shell = req.Shell
+		g.NoLoginShell = req.NoLoginShell
+		g.Cols = req.Cols
+		g.Rows = req.Rows
 		if err := s.cfg.SaveGlobal(g); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
