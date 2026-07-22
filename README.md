@@ -133,6 +133,15 @@ was used, the exact `argv` that ran, and the final exit code. View them with the
 **Logs** button on any project card, or read the files directly. Secondary
 windows log under their own name (e.g. `barista-2.log`).
 
+### Nested herdr sessions
+
+herdr disables nested sessions by default (`allow_nested = false`). Terminal
+Cowboy launches **independent top-level** sessions, so it scrubs herdr's
+session-context env vars (`HERDR_SESSION`, `HERDR_*_ID`, socket paths) from each
+launch — both from the spawned process and via an `unset` in the launch script.
+That means you can run the launcher from inside an existing herdr session
+without tripping the nested-session guard.
+
 ## Settings
 
 The **⚙ Settings** panel edits the global `config.toml`:

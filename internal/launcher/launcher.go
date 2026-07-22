@@ -13,6 +13,26 @@ import (
 	"terminal-cowboy/internal/config"
 )
 
+// herdrSessionVars are the runtime env vars herdr injects into a session's
+// child processes to mark session context. Terminal Cowboy launches
+// independent top-level sessions, so these must be scrubbed — otherwise a
+// launch from inside an existing herdr session trips herdr's nested-session
+// guard ("nested herdr is disabled by default"). Config vars like
+// HERDR_CONFIG_PATH / HERDR_LOG are deliberately left intact.
+var herdrSessionVars = []string{
+	"HERDR_SESSION",
+	"HERDR_CLIENT_SOCKET_PATH",
+	"HERDR_SOCKET_PATH",
+	"HERDR_PANE_ID",
+	"HERDR_TAB_ID",
+	"HERDR_WORKSPACE_ID",
+	"HERDR_ACTIVE_PANE_ID",
+	"HERDR_ACTIVE_TAB_ID",
+	"HERDR_ACTIVE_WORKSPACE_ID",
+	"HERDR_ACTIVE_PANE_CWD",
+	"HERDR_REATTACH_COMMAND",
+}
+
 // Launcher spawns sessions into a chosen terminal.
 type Launcher struct {
 	Term     *Terminal
@@ -90,6 +110,10 @@ func (l *Launcher) Script(s config.Session, herdrSession, logPath string) string
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "LOG=%s; ", log)
+	// Scrub inherited herdr session context so a launch from inside an existing
+	// herdr session starts a clean top-level session instead of tripping the
+	// nested-session guard.
+	fmt.Fprintf(&b, "unset %s; ", strings.Join(herdrSessionVars, " "))
 	// Friendly banner in the window.
 	fmt.Fprintf(&b, "printf '\\033[33m🤠 terminal-cowboy\\033[0m  project=%s  session=%s\\n'; ",
 		shBanner(s.Name), shBanner(herdrSession))
@@ -129,7 +153,7 @@ func (l *Launcher) Launch(s config.Session, herdrSession, logDir string) error {
 	l.record(logPath, s, name, argv)
 
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = os.Environ()
+	cmd.Env = cleanEnv()
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
@@ -173,6 +197,26 @@ func shBanner(s string) string {
 	s = strings.ReplaceAll(s, `'`, `'\''`)
 	s = strings.ReplaceAll(s, `%`, `%%`)
 	return s
+}
+
+// cleanEnv returns the current environment minus herdr's session-context vars.
+func cleanEnv() []string {
+	skip := make(map[string]bool, len(herdrSessionVars))
+	for _, v := range herdrSessionVars {
+		skip[v] = true
+	}
+	env := os.Environ()
+	out := env[:0]
+	for _, kv := range env {
+		name := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			name = kv[:i]
+		}
+		if !skip[name] {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 func sortedEnv(m map[string]string) []string {
