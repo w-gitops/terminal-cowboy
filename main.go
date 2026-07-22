@@ -196,9 +196,9 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 	for _, sess := range s.cfg.Sessions {
 		switch config.Backend(sess.EffectiveRunner()) {
 		case "herdr":
-			herdrProject[sess.Name] = true
+			herdrProject[sess.SessionKey()] = true
 		case "tmux":
-			tmuxProject[sess.Name] = true
+			tmuxProject[sess.SessionKey()] = true
 		}
 	}
 
@@ -233,9 +233,9 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 		running := false
 		switch backend {
 		case "herdr":
-			running = herdrRunning[sess.Name]
+			running = herdrRunning[sess.SessionKey()]
 		case "tmux":
-			running = tmuxRunning[sess.Name]
+			running = tmuxRunning[sess.SessionKey()]
 		}
 		resp.Sessions = append(resp.Sessions, sessionView{
 			Name:        sess.Name,
@@ -506,14 +506,18 @@ func (s *server) handleStop(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "name required")
 		return
 	}
-	// Resolve backend: explicit, else from a matching project's runner.
+	// Resolve backend + actual session key. For a managed project the real
+	// backend session name may differ from the project name (sesh uses the cwd
+	// basename); for an unmanaged session req.Name is already the backend name.
 	backend := req.Backend
-	if backend == "" {
-		if sess, ok := s.findSession(req.Name); ok {
+	target := req.Name
+	if sess, ok := s.findSession(req.Name); ok {
+		if backend == "" {
 			backend = config.Backend(sess.EffectiveRunner())
-		} else {
-			backend = "herdr"
 		}
+		target = sess.SessionKey()
+	} else if backend == "" {
+		backend = "herdr"
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -521,9 +525,9 @@ func (s *server) handleStop(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch backend {
 	case "tmux":
-		err = (&tmux.Client{}).Stop(ctx, req.Name)
+		err = (&tmux.Client{}).Stop(ctx, target)
 	default:
-		err = (&herdr.Client{Bin: s.cfg.Global.HerdrBin}).Stop(ctx, req.Name)
+		err = (&herdr.Client{Bin: s.cfg.Global.HerdrBin}).Stop(ctx, target)
 	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

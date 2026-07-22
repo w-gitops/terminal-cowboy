@@ -132,8 +132,13 @@ func (l *Launcher) runnerCommand(s config.Session, name string) []string {
 		return c
 
 	case config.RunnerSesh:
-		// sesh connect attaches or creates a tmux-backed session.
-		c := []string{shQuote(l.SeshBin), "connect", shQuote(name)}
+		// sesh is directory-oriented: connect to the project's cwd (falling back
+		// to the name only when no cwd is set).
+		target := s.Cwd
+		if target == "" {
+			target = name
+		}
+		c := []string{shQuote(l.SeshBin), "connect", shQuote(target)}
 		if s.RunnerCmd != "" {
 			c = append(c, "--command", shQuote(s.RunnerCmd))
 		}

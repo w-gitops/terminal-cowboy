@@ -38,7 +38,7 @@ hold-open) is identical across all of them; only the inner command differs.
 | runner | launches | running-state / Stop via |
 |--------|----------|--------------------------|
 | **herdr** (default) | `herdr --session <name>` (+ remote/handoff/args) | herdr API socket |
-| **sesh** | `sesh connect <name>` (+ optional command) | tmux |
+| **sesh** | `sesh connect <cwd>` (directory-oriented; + optional command) | tmux |
 | **tmux** | `tmux new-session -A -s <name>` (+ optional command) | tmux |
 | **shell** | a plain interactive shell — no multiplexer | — (ephemeral, no dot) |
 

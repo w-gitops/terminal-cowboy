@@ -76,6 +76,17 @@ func (s Session) EffectiveRunner() string {
 	return s.Runner
 }
 
+// SessionKey is the name the backend actually uses for this project's session,
+// which is what status and stop key off. For sesh (directory-oriented) that is
+// the cwd's basename — the tmux session sesh creates; for everything else it's
+// the project name.
+func (s Session) SessionKey() string {
+	if s.EffectiveRunner() == RunnerSesh && s.Cwd != "" {
+		return filepath.Base(strings.TrimRight(s.Cwd, "/"))
+	}
+	return s.Name
+}
+
 // Backend returns the status/control backend for a runner: "herdr", "tmux"
 // (also serves sesh), or "" for runners with no persistent session (shell).
 func Backend(runner string) string {
