@@ -19,7 +19,9 @@
   header h1{font-size:20px;margin:0;letter-spacing:.5px}
   header .hat{font-size:26px}
   header h1 span{color:var(--accent)}
-  .term-badge{margin-left:auto;font:12px/1 var(--mono);color:var(--dim);
+  .hdr-right{margin-left:auto;display:flex;flex-direction:column;
+    align-items:flex-end;gap:6px}
+  .term-badge{font:12px/1 var(--mono);color:var(--dim);
     display:flex;align-items:center;gap:8px}
   .term-badge b{color:var(--accent)}
   .wrap{max-width:900px;margin:0 auto;padding:24px}
@@ -87,8 +89,10 @@
 <header>
   <span class="hat">🤠</span>
   <h1>Terminal <span>Cowboy</span></h1>
-  <span class="ver" id="ver" title="build version"></span>
-  <div class="term-badge" id="termBadge">…</div>
+  <div class="hdr-right">
+    <div class="term-badge" id="termBadge">…</div>
+    <span class="ver" id="ver" title="build version"></span>
+  </div>
 </header>
 
 <div class="wrap">
