@@ -154,6 +154,10 @@ func (l *Launcher) Script(s config.Session, herdrSession, logPath string) string
 		fmt.Fprintf(&b,
 			"cd %s || { msg=\"cannot cd to %s\"; printf '\\033[31mcowboy: %%s\\033[0m\\n' \"$msg\" | tee -a \"$LOG\"; printf 'press Enter to close…'; read _; exit 1; }; ",
 			shQuote(s.Cwd), shBanner(s.Cwd))
+	} else {
+		// No cwd set: cd to $HOME so herdr names the workspace after the home
+		// dir rather than inheriting (and leaking) terminal-cowboy's own cwd.
+		b.WriteString("cd \"$HOME\" 2>/dev/null; ")
 	}
 	// Run the real command, capture its exit code, log start/end.
 	fmt.Fprintf(&b, "printf '[%%s] launch %s\\n' \"$(date '+%%F %%T')\" >> \"$LOG\"; ", shBanner(herdrSession))
