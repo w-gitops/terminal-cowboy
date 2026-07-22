@@ -39,6 +39,10 @@ type Session struct {
 	HerdrArgs   []string          `toml:"herdr_args"`  // extra args appended to `herdr --session <name>`
 	Env         map[string]string `toml:"env"`         // plain env vars exported into the session
 
+	// WorkspaceLabel overrides the herdr workspace label for a primary launch
+	// (blank = use the session name). Free text — spaces/emoji allowed.
+	WorkspaceLabel string `toml:"workspace_label"`
+
 	// Structured herdr options (also expressible via HerdrArgs, but nicer in the UI).
 	Remote            string `toml:"remote"`             // --remote <ssh-target>
 	RemoteKeybindings string `toml:"remote_keybindings"` // local|server (only with remote)

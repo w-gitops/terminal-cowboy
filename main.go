@@ -268,27 +268,34 @@ func (s *server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Label the initial herdr workspace with the session name (herdr otherwise
-	// names it after the launch directory). Best-effort, in the background.
+	// Label the initial herdr workspace (herdr otherwise names it after the
+	// launch directory). Best-effort, in the background.
 	if !s.cfg.Global.NoWorkspaceLabel {
 		name := req.HerdrSession
 		if name == "" {
 			name = sess.Name
 		}
-		labelWorkspaceAsync(s.cfg.Global.HerdrBin, name, filepath.Join(logDir, name+".log"))
+		// Primary launch uses the project's custom label if set; a secondary
+		// window (explicit herdr_session override) keeps the name you typed.
+		label := name
+		primary := req.HerdrSession == "" || req.HerdrSession == sess.Name
+		if primary && sess.WorkspaceLabel != "" {
+			label = sess.WorkspaceLabel
+		}
+		labelWorkspaceAsync(s.cfg.Global.HerdrBin, name, label, filepath.Join(logDir, name+".log"))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "terminal": termID})
 }
 
-// labelWorkspaceAsync renames the session's initial workspace to `name` in the
-// background, giving herdr time to start. Failures are logged, never fatal.
-func labelWorkspaceAsync(herdrBin, name, logPath string) {
+// labelWorkspaceAsync renames session `name`'s initial workspace to `label` in
+// the background, giving herdr time to start. Failures are logged, never fatal.
+func labelWorkspaceAsync(herdrBin, name, label, logPath string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		hc := &herdr.Client{Bin: herdrBin}
-		if err := hc.LabelInitialWorkspace(ctx, name, name); err != nil {
+		if err := hc.LabelInitialWorkspace(ctx, name, label); err != nil {
 			if f, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); ferr == nil {
 				fmt.Fprintf(f, "workspace label skipped: %v\n", err)
 				f.Close()
@@ -346,6 +353,7 @@ type sessionRequest struct {
 	Terminal          string            `json:"terminal"`
 	Cols              int               `json:"cols"`
 	Rows              int               `json:"rows"`
+	WorkspaceLabel    string            `json:"workspace_label"`
 	Remote            string            `json:"remote"`
 	RemoteKeybindings string            `json:"remote_keybindings"`
 	Handoff           bool              `json:"handoff"`
@@ -385,6 +393,7 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 			"terminal":           sess.Terminal,
 			"cols":               sess.Cols,
 			"rows":               sess.Rows,
+			"workspace_label":    sess.WorkspaceLabel,
 			"remote":             sess.Remote,
 			"remote_keybindings": sess.RemoteKeybindings,
 			"handoff":            sess.Handoff,
@@ -411,6 +420,7 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 			Terminal:          req.Terminal,
 			Cols:              req.Cols,
 			Rows:              req.Rows,
+			WorkspaceLabel:    req.WorkspaceLabel,
 			Remote:            req.Remote,
 			RemoteKeybindings: req.RemoteKeybindings,
 			Handoff:           req.Handoff,

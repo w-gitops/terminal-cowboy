@@ -133,6 +133,10 @@
     <select id="fTerminal"></select>
     <div class="hint">Blank = use the global default from Settings.</div>
 
+    <label>Workspace label</label>
+    <input id="fWsLabel" placeholder="blank = session name" autocomplete="off">
+    <div class="hint">herdr workspace title after launch. Free text (spaces/emoji ok). Blank = the session name.</div>
+
     <div style="display:flex;gap:12px">
       <div style="flex:1">
         <label>Columns (characters wide)</label>
@@ -454,6 +458,7 @@ function openNew(){
   $('#fName').disabled=false;
   $('#fName').value='';$('#fDesc').value='';$('#fCwd').value='';$('#fArgs').value='';$('#fOp').value='';
   $('#fCols').value='';$('#fRows').value='';$('#fRemote').value='';$('#fRemoteKb').value='local';$('#fHandoff').checked=false;
+  $('#fWsLabel').value='';
   fillTerminalOptions(''); syncRemote();
   $('#envRows').innerHTML='';
   show('#editScrim'); $('#fName').focus();
@@ -469,6 +474,7 @@ async function openEdit(name){
     $('#fCwd').value=s.cwd||'';$('#fArgs').value=(s.herdr_args||[]).join(' ');
     $('#fOp').value=s.op_env||'';
     fillTerminalOptions(s.terminal||'');
+    $('#fWsLabel').value=s.workspace_label||'';
     $('#fCols').value=s.cols||'';$('#fRows').value=s.rows||'';
     $('#fRemote').value=s.remote||'';$('#fRemoteKb').value=s.remote_keybindings||'local';
     $('#fHandoff').checked=!!s.handoff; syncRemote();
@@ -494,6 +500,7 @@ $('#saveBtn').onclick=async()=>{
     herdr_args:args?args.split(/\s+/):[],
     env,
     terminal:$('#fTerminal').value,
+    workspace_label:$('#fWsLabel').value.trim(),
     cols:parseInt($('#fCols').value,10)||0,
     rows:parseInt($('#fRows').value,10)||0,
     remote,

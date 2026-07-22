@@ -191,11 +191,15 @@ windows log under their own name (e.g. `barista-2.log`).
 ### Workspace naming
 
 herdr labels a session's initial workspace after the directory it launches in.
-By default Terminal Cowboy renames that workspace to the **session name** a moment
-after launch (via `herdr workspace rename` on the session's own API socket), so
-the workspace always reflects the project/session — e.g. `barista`, or `barista-2`
-for a secondary window. Turn this off with `no_workspace_label = true`
-(Settings → "Rename the herdr workspace…") to keep herdr's directory-based label.
+By default Terminal Cowboy renames that workspace a moment after launch (via
+`herdr workspace rename` on the session's own API socket), so the workspace
+reflects the project/session rather than the directory.
+
+- **Per project:** set a **Workspace label** in the project editor (free text —
+  spaces/emoji allowed, e.g. `☕ Barista`). Blank falls back to the session name.
+- **Secondary windows** (e.g. `barista-2`) keep the name you typed.
+- **Global toggle:** `no_workspace_label = true` (Settings → "Rename the herdr
+  workspace…") disables renaming entirely and keeps herdr's directory-based label.
 
 ### Nested herdr sessions
 
