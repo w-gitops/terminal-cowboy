@@ -1,7 +1,8 @@
 BINARY := terminal-cowboy
 DIST   := dist
+PREFIX ?= $(HOME)/.local
 
-.PHONY: build run fmt vet test clean cross
+.PHONY: build run fmt vet test clean cross install uninstall
 
 build:
 	go build -o $(BINARY) .
@@ -20,6 +21,19 @@ test:
 
 clean:
 	rm -rf $(BINARY) $(DIST)
+
+## install: build and install as terminal-cowboy with tcow / tcowboy launchers.
+install: build
+	install -d $(PREFIX)/bin
+	install -m 0755 $(BINARY) $(PREFIX)/bin/$(BINARY)
+	ln -sf $(BINARY) $(PREFIX)/bin/tcow
+	ln -sf $(BINARY) $(PREFIX)/bin/tcowboy
+	@echo "installed: $(PREFIX)/bin/{$(BINARY),tcow,tcowboy}"
+	@echo "run:       tcow --open"
+
+uninstall:
+	rm -f $(PREFIX)/bin/$(BINARY) $(PREFIX)/bin/tcow $(PREFIX)/bin/tcowboy
+	@echo "removed tcow / tcowboy / $(BINARY) from $(PREFIX)/bin"
 
 ## cross: build release binaries for the supported hosts.
 cross:

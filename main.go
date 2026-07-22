@@ -61,6 +61,7 @@ func main() {
 	mux.HandleFunc("/api/launch", srv.handleLaunch)
 	mux.HandleFunc("/api/session", srv.handleSession)
 	mux.HandleFunc("/api/stop", srv.handleStop)
+	mux.HandleFunc("/api/attach", srv.handleAttach)
 	mux.HandleFunc("/api/logs", srv.handleLogs)
 	mux.HandleFunc("/api/config", srv.handleConfig)
 
@@ -122,12 +123,22 @@ type sessionView struct {
 	Running     bool              `json:"running"`
 }
 
+// unmanagedView is a herdr session that is running (or known to herdr) but has
+// no matching Terminal Cowboy project — e.g. the default session, or a
+// secondary window like "barista-2" that was never saved as a project.
+type unmanagedView struct {
+	Name    string `json:"name"`
+	Running bool   `json:"running"`
+	Default bool   `json:"default"`
+}
+
 type stateResponse struct {
-	Terminal           string        `json:"terminal"`     // selected terminal id, or "" if none
-	TerminalErr        string        `json:"terminal_err"` // why selection failed, if any
-	AvailableTerminals []string      `json:"available_terminals"`
-	HerdrOK            bool          `json:"herdr_ok"`
-	Sessions           []sessionView `json:"sessions"`
+	Terminal           string          `json:"terminal"`     // selected terminal id, or "" if none
+	TerminalErr        string          `json:"terminal_err"` // why selection failed, if any
+	AvailableTerminals []string        `json:"available_terminals"`
+	HerdrOK            bool            `json:"herdr_ok"`
+	Sessions           []sessionView   `json:"sessions"`
+	Unmanaged          []unmanagedView `json:"unmanaged"`
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -158,9 +169,27 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 	// Live herdr state; failure is non-fatal (state unknown).
 	hc := &herdr.Client{Bin: s.cfg.Global.HerdrBin}
 	running := map[string]bool{}
+	var herdrSessions []herdr.Session
 	if sessions, err := hc.List(r.Context()); err == nil {
 		resp.HerdrOK = true
+		herdrSessions = sessions
 		running = herdr.RunningSet(sessions)
+	}
+
+	projectNames := make(map[string]bool, len(s.cfg.Sessions))
+	for _, sess := range s.cfg.Sessions {
+		projectNames[sess.Name] = true
+	}
+	// Running herdr sessions with no backing project — visible so you can see
+	// and control background sessions that Terminal Cowboy didn't launch.
+	for _, hs := range herdrSessions {
+		if hs.Running && !projectNames[hs.Name] {
+			resp.Unmanaged = append(resp.Unmanaged, unmanagedView{
+				Name:    hs.Name,
+				Running: hs.Running,
+				Default: hs.Default,
+			})
+		}
 	}
 
 	for _, sess := range s.cfg.Sessions {
@@ -226,6 +255,45 @@ func (s *server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := l.Launch(sess, req.HerdrSession, logDir); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "terminal": l.Term.ID})
+}
+
+type attachRequest struct {
+	Name string `json:"name"`
+}
+
+// handleAttach opens a window attached to an existing herdr session that has no
+// backing project (an "unmanaged" session). No cwd/env/credentials are applied
+// — it simply runs `herdr --session <name>`.
+func (s *server) handleAttach(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	var req attachRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := config.ValidateName(req.Name); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	l, err := launcher.New(s.cfg)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	logDir, err := s.cfg.LogDir()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Bare session: just attach by name.
+	if err := l.Launch(config.Session{Name: req.Name}, req.Name, logDir); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

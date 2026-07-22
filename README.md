@@ -21,6 +21,10 @@ deploy.
   `herdr session list --json`) with attach/stop controls.
 - **Manage projects from the UI** — create, edit, and delete projects without
   touching config files.
+- **Background sessions** — running herdr sessions with no project here (the
+  `default` session, or extra windows like `barista-2`) are listed under
+  *Background sessions* so you can see, attach to, or stop sessions Terminal
+  Cowboy didn't launch. The `default` session is never offered for stopping.
 - **1Password credentials** — an optional `.op.env` per project is loaded with
   `op run --env-file`, so `op://vault/item/field` references resolve at launch
   and secrets never sit decrypted on disk.
@@ -37,6 +41,15 @@ Auto-detected, with a config override (`terminal = "…"`):
 iTerm2 has no exec CLI, so it is driven via AppleScript (`osascript`).
 
 ## Install / run
+
+Install the `tcow` / `tcowboy` launcher commands into `~/.local/bin`:
+
+```sh
+make install       # installs terminal-cowboy + tcow + tcowboy symlinks
+tcow --open        # run and open the UI in your browser
+```
+
+Or run without installing:
 
 ```sh
 make run           # build + open the UI in your browser
