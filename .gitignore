@@ -1,0 +1,4 @@
+/terminal-cowboy
+/dist/
+*.op.env
+.DS_Store
