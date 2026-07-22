@@ -233,6 +233,10 @@
     <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)">
       <input type="checkbox" id="sLogin" style="width:auto"> Use a login shell (loads your profile so PATH finds herdr/op)
     </label>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)">
+      <input type="checkbox" id="sLabelWs" style="width:auto"> Rename the herdr workspace to the session name after launch
+    </label>
+    <div class="hint">Otherwise herdr labels the initial workspace after the launch directory.</div>
 
     <div class="hint" id="sPath" style="margin-top:14px"></div>
     <div class="modal-actions">
@@ -521,6 +525,7 @@ async function openSettings(){
     $('#sCols').value=c.cols||'';$('#sRows').value=c.rows||'';
     $('#sShell').value=c.shell||'';
     $('#sLogin').checked=!c.no_login_shell;
+    $('#sLabelWs').checked=!c.no_workspace_label;
     $('#sPath').textContent='config file: '+(c.config_path||'');
     // terminal dropdown: auto + detected
     const avail = STATE.available_terminals||[];
@@ -548,6 +553,7 @@ $('#saveSettings').onclick=async()=>{
     rows:parseInt($('#sRows').value,10)||0,
     shell:$('#sShell').value.trim(),
     no_login_shell:!$('#sLogin').checked,
+    no_workspace_label:!$('#sLabelWs').checked,
   };
   try{
     const r=await api('/api/config',{method:'POST',headers:hdr(),body:JSON.stringify(payload)});

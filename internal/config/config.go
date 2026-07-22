@@ -26,6 +26,9 @@ type Global struct {
 	NoLoginShell bool   `toml:"no_login_shell"` // don't use a login shell (default: login shell)
 	Cols         int    `toml:"cols"`           // initial window columns (0 = terminal default)
 	Rows         int    `toml:"rows"`           // initial window rows (0 = terminal default)
+	// By default the initial herdr workspace is renamed to the session name
+	// after launch (herdr otherwise labels it after the launch directory).
+	NoWorkspaceLabel bool `toml:"no_workspace_label"`
 }
 
 // Session is one launchable backend, defined by sessions/<name>/session.toml.

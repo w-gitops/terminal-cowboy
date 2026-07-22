@@ -188,6 +188,15 @@ was used, the exact `argv` that ran, and the final exit code. View them with the
 **Logs** button on any project card, or read the files directly. Secondary
 windows log under their own name (e.g. `barista-2.log`).
 
+### Workspace naming
+
+herdr labels a session's initial workspace after the directory it launches in.
+By default Terminal Cowboy renames that workspace to the **session name** a moment
+after launch (via `herdr workspace rename` on the session's own API socket), so
+the workspace always reflects the project/session — e.g. `barista`, or `barista-2`
+for a secondary window. Turn this off with `no_workspace_label = true`
+(Settings → "Rename the herdr workspace…") to keep herdr's directory-based label.
+
 ### Nested herdr sessions
 
 herdr disables nested sessions by default (`allow_nested = false`). Terminal

@@ -267,7 +267,34 @@ func (s *server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Label the initial herdr workspace with the session name (herdr otherwise
+	// names it after the launch directory). Best-effort, in the background.
+	if !s.cfg.Global.NoWorkspaceLabel {
+		name := req.HerdrSession
+		if name == "" {
+			name = sess.Name
+		}
+		labelWorkspaceAsync(s.cfg.Global.HerdrBin, name, filepath.Join(logDir, name+".log"))
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "terminal": termID})
+}
+
+// labelWorkspaceAsync renames the session's initial workspace to `name` in the
+// background, giving herdr time to start. Failures are logged, never fatal.
+func labelWorkspaceAsync(herdrBin, name, logPath string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		hc := &herdr.Client{Bin: herdrBin}
+		if err := hc.LabelInitialWorkspace(ctx, name, name); err != nil {
+			if f, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); ferr == nil {
+				fmt.Fprintf(f, "workspace label skipped: %v\n", err)
+				f.Close()
+			}
+		}
+	}()
 }
 
 type attachRequest struct {
@@ -436,14 +463,15 @@ func (s *server) handleStop(w http.ResponseWriter, r *http.Request) {
 }
 
 type configRequest struct {
-	Addr         string `json:"addr"`
-	Port         int    `json:"port"`
-	Terminal     string `json:"terminal"`
-	NewTab       bool   `json:"new_tab"`
-	Shell        string `json:"shell"`
-	NoLoginShell bool   `json:"no_login_shell"`
-	Cols         int    `json:"cols"`
-	Rows         int    `json:"rows"`
+	Addr             string `json:"addr"`
+	Port             int    `json:"port"`
+	Terminal         string `json:"terminal"`
+	NewTab           bool   `json:"new_tab"`
+	Shell            string `json:"shell"`
+	NoLoginShell     bool   `json:"no_login_shell"`
+	Cols             int    `json:"cols"`
+	Rows             int    `json:"rows"`
+	NoWorkspaceLabel bool   `json:"no_workspace_label"`
 }
 
 // handleConfig gets (GET) or updates (POST) the global web-server + launch
@@ -458,15 +486,16 @@ func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		g := s.cfg.Global
 		writeJSON(w, http.StatusOK, map[string]any{
-			"addr":           g.Addr,
-			"port":           g.Port,
-			"terminal":       g.Terminal,
-			"new_tab":        g.NewTab,
-			"shell":          g.Shell,
-			"no_login_shell": g.NoLoginShell,
-			"cols":           g.Cols,
-			"rows":           g.Rows,
-			"config_path":    filepath.Join(s.cfg.Root, "config.toml"),
+			"addr":               g.Addr,
+			"port":               g.Port,
+			"terminal":           g.Terminal,
+			"new_tab":            g.NewTab,
+			"shell":              g.Shell,
+			"no_login_shell":     g.NoLoginShell,
+			"cols":               g.Cols,
+			"rows":               g.Rows,
+			"no_workspace_label": g.NoWorkspaceLabel,
+			"config_path":        filepath.Join(s.cfg.Root, "config.toml"),
 		})
 
 	case http.MethodPost:
@@ -493,6 +522,7 @@ func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		g.NoLoginShell = req.NoLoginShell
 		g.Cols = req.Cols
 		g.Rows = req.Rows
+		g.NoWorkspaceLabel = req.NoWorkspaceLabel
 		if err := s.cfg.SaveGlobal(g); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
