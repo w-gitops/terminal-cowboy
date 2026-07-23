@@ -74,6 +74,25 @@ make install       # installs terminal-cowboy + tcow + tcowboy symlinks
 tcow --open        # run and open the UI in your browser
 ```
 
+### Run it on login (Linux / systemd)
+
+Install and enable a systemd **user service** so it starts on graphical login
+(e.g. after a reboot) and serves `http://127.0.0.1:8787/`:
+
+```sh
+make service-install     # copies packaging/terminal-cowboy.service, enables + starts it
+```
+
+After that, `make install` **auto-restarts** the service to pick up the new
+binary. Helpers:
+
+```sh
+make service-restart     # restart now (best-effort; no-op if not installed)
+make service-status      # systemctl --user status
+make service-logs        # journalctl --user -f
+make service-uninstall   # disable + remove the unit
+```
+
 Or run without installing:
 
 ```sh

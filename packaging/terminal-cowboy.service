@@ -1,0 +1,18 @@
+[Unit]
+Description=Terminal Cowboy — herdr/sesh/tmux session launcher
+Documentation=https://github.com/w-gitops/terminal-cowboy
+# Start within the graphical session so it inherits DISPLAY/WAYLAND_DISPLAY,
+# which the launched terminal windows need.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# Run through a login shell so PATH picks up ~/.local/bin, linuxbrew, and
+# /usr/bin — the server resolves wezterm/herdr/op/sesh/tmux at launch time.
+ExecStart=/bin/bash -lc 'exec %h/.local/bin/tcow'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
