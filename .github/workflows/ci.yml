@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - name: gofmt (fail on unformatted files)
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"; echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build (all release targets)
+        run: |
+          GOOS=linux  GOARCH=amd64 go build -o /dev/null .
+          GOOS=linux  GOARCH=arm64 go build -o /dev/null .
+          GOOS=darwin GOARCH=arm64 go build -o /dev/null .
+
+      - name: test
+        run: go test ./...
+
+      # Guard: the checked-in tree must stay clean after tidy/generate. If
+      # `go mod tidy` (or codegen) changes anything, the commit was incomplete.
+      - name: go mod tidy is committed
+        run: go mod tidy
+
+      - name: working tree is clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::tree is dirty after build/tidy — commit the changes below:"
+            git status --porcelain
+            git diff
+            exit 1
+          fi

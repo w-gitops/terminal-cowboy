@@ -5,12 +5,14 @@ UNITDIR := $(HOME)/.config/systemd/user
 UNIT    := terminal-cowboy.service
 
 # Version: YYYY-MM-DD.HHMM-<shortsha>[-dirty], computed at build time.
+# "dirty" uses `git status --porcelain`, so it also flags staged and UNTRACKED
+# files — both of which get compiled in but aren't at the named commit.
 SHA     := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo nogit)
-DIRTY   := $(shell git diff --quiet 2>/dev/null || echo -dirty)
+DIRTY   := $(shell test -z "$$(git status --porcelain 2>/dev/null)" || echo -dirty)
 VERSION := $(shell date +%Y-%m-%d.%H%M)-$(SHA)$(DIRTY)
 LDFLAGS := -X 'main.Version=$(VERSION)'
 
-.PHONY: build run fmt vet test clean cross install uninstall version \
+.PHONY: build run fmt vet test clean cross install uninstall version dirty-check \
         service-install service-restart service-status service-logs service-uninstall
 
 version:
@@ -35,7 +37,15 @@ clean:
 	rm -rf $(BINARY) $(DIST)
 
 ## install: build and install as terminal-cowboy with tcow / tcowboy launchers.
-install: build
+## dirty-check: warn (don't block) when building from an uncommitted tree.
+dirty-check:
+	@if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then \
+		printf '\033[33m⚠ working tree is dirty — building %s\033[0m\n' "$(VERSION)"; \
+		printf '  includes uncommitted/untracked changes; not reproducible from git.\n'; \
+		printf '  commit first for a clean, traceable build.\n'; \
+	fi
+
+install: dirty-check build
 	install -d $(PREFIX)/bin
 	install -m 0755 $(BINARY) $(PREFIX)/bin/$(BINARY)
 	ln -sf $(BINARY) $(PREFIX)/bin/tcow
