@@ -338,9 +338,9 @@ function renderList(){
   const s = STATE.sessions||[];
   if(!s.length){
     list.innerHTML = `<div class="empty">No projects yet. Click <b>+ New project</b> to add one.</div>`;
-    return;
+  }else{
+    for(const sess of s) list.appendChild(card(sess));
   }
-  for(const sess of s) list.appendChild(card(sess));
   renderUnmanaged();
 }
 
