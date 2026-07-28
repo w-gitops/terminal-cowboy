@@ -276,3 +276,7 @@ The **⚙ Settings** panel edits the global `config.toml`:
 
 `herdr`, and whichever terminal you use, on PATH. `op` (1Password CLI) signed in
 only if a project uses `.op.env`.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
