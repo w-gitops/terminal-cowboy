@@ -279,4 +279,4 @@ only if a project uses `.op.env`.
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Licensed under the [MIT License](LICENSE).
